@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>24/7 Host Deployment Comparison — Browser-Agent Platform</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d2129; --ink:#e8eaed; --muted:#9aa3b2;
+    --line:#2a2f3a; --accent:#5b9cff; --good:#3ec28f; --warn:#f0b542; --bad:#f06d6d;
+    --chip:#222836;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  header{padding:40px 32px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#141821,#0f1115)}
+  h1{margin:0 0 6px;font-size:28px}
+  .sub{color:var(--muted);font-size:14px}
+  main{max-width:1180px;margin:0 auto;padding:28px 24px 80px}
+  h2{margin:42px 0 12px;font-size:21px;border-left:4px solid var(--accent);padding-left:12px}
+  h3{margin:26px 0 8px;font-size:17px;color:#cdd6e6}
+  p{color:#d5dae3}
+  table{width:100%;border-collapse:collapse;margin:14px 0 8px;font-size:13.5px;background:var(--panel);border-radius:10px;overflow:hidden}
+  th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:var(--panel2);color:#cfe0ff;font-weight:600}
+  tr:last-child td{border-bottom:none}
+  .good{color:var(--good);font-weight:600}
+  .warn{color:var(--warn);font-weight:600}
+  .bad{color:var(--bad);font-weight:600}
+  .chip{display:inline-block;background:var(--chip);border:1px solid var(--line);border-radius:999px;padding:2px 10px;font-size:12px;margin:2px;color:#b9c4d6}
+  .pick{background:linear-gradient(90deg,#16241c,#171a21);border:1px solid #2f6b4d;border-radius:10px;padding:14px 16px;margin:14px 0}
+  .pick b{color:var(--good)}
+  .note{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:14px 0;color:var(--muted)}
+  code{background:#11151c;border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:13px;color:#9fd0ff}
+  pre{background:#0c0f14;border:1px solid var(--line);border-radius:10px;padding:16px;overflow:auto;font-size:13px;color:#cdd6e6}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:820px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .tag{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+  ul{margin:8px 0 8px 18px}
+</style>
+</head>
+<body>
+<header>
+  <h1>24/7 Host Deployment — Cloud Comparison &amp; Recommendation</h1>
+  <div class="sub">Browser-Agent Platform · v0.1 · 2026-06-29 · China-origin operator, dual China + global cloud, persistent-now / lightweight-later</div>
+</header>
+<main>
+
+<h2>1. What the host must actually do</h2>
+<p>The agent is a long-lived process running a <b>headful Chrome</b> (browser-use over CDP) with a <b>persistent profile</b>, a Telegram gateway, a scheduler, and a short-lived CDP-screencast remote view. Selecting a host is about matching that workload, not raw price.</p>
+<table>
+  <tr><th>Requirement</th><th>Why it matters</th></tr>
+  <tr><td>Always-on, stateful</td><td>Persistent Chrome profile + workspace must survive restarts → needs a persistent disk, not ephemeral functions.</td></tr>
+  <tr><td>Headful browser-capable</td><td>~1.5–2 GB RAM minimum; CPU spikes during page render. Rules out micro/serverless tiers.</td></tr>
+  <tr><td>Reliable outbound to LLM + Telegram</td><td class="warn">Critical in China: Anthropic/OpenAI/Telegram are largely blocked/throttled → biggest decision driver.</td></tr>
+  <tr><td>Inbound for remote-view link</td><td>Solved by Cloudflare Tunnel (egress only) → no public IP / ICP filing needed.</td></tr>
+  <tr><td>Cheap, single small node</td><td>One user, one agent. A 2 vCPU / 2–4 GB VPS is plenty. Occam's razor.</td></tr>
+</table>
+
+<h2>2. China cloud options</h2>
+<table>
+  <tr><th>Provider</th><th>Product</th><th>Fit</th><th>Notes for our use</th></tr>
+  <tr><td>Alibaba Cloud</td><td>ECS (e/t6 burstable)</td><td class="warn">Good infra, hard egress</td><td>Cheap inside China, fast to job-board scraping of CN sites. <span class="bad">Cannot reach Anthropic/OpenAI/Telegram without a separate path.</span> Mainland needs ICP for inbound web; we avoid that via tunnel.</td></tr>
+  <tr><td>Tencent Cloud</td><td>CVM</td><td class="warn">Same as Alibaba</td><td>Equivalent. Strong domestic latency, same foreign-egress block.</td></tr>
+  <tr><td>Huawei Cloud</td><td>ECS</td><td class="warn">Same</td><td>Equivalent; enterprise-leaning.</td></tr>
+  <tr><td>Alibaba Cloud <b>Hong Kong</b></td><td>ECS (HK region)</td><td class="good">Best China-side pick</td><td>Outside GFW: <b>reaches Anthropic/OpenAI/Telegram directly</b>, low latency to mainland, pay with CN account. Strong sweet spot.</td></tr>
+  <tr><td>Tencent <b>Singapore/HK</b></td><td>CVM</td><td class="good">Strong alt</td><td>Same logic, good APAC latency.</td></tr>
+</table>
+<div class="note">Mainland China nodes are great for reaching <i>Chinese</i> targets but cannot reach the foreign LLM APIs and Telegram the platform depends on. The realistic China play is an <b>offshore region (Hong Kong/Singapore)</b> of a Chinese provider.</div>
+
+<h2>3. Global cloud options</h2>
+<table>
+  <tr><th>Provider</th><th>Product</th><th>Persistent VM</th><th>Browser fit</th><th>Notes</th></tr>
+  <tr><td>AWS</td><td>Lightsail / EC2 t4g.small</td><td class="good">Yes</td><td class="good">Yes</td><td>Lightsail flat ~$5–10/mo, simplest. EC2 for scale. Mature, global.</td></tr>
+  <tr><td>Google Cloud</td><td>Compute Engine e2-small</td><td class="good">Yes</td><td class="good">Yes</td><td>Comparable to EC2; good free egress tiers; slightly fiddlier.</td></tr>
+  <tr><td>Fly.io</td><td>Machines</td><td class="good">Yes (volumes)</td><td class="good">Yes</td><td>Great DX, scale-to-zero possible → bridges to lightweight later.</td></tr>
+  <tr><td>DigitalOcean</td><td>Droplet</td><td class="good">Yes</td><td class="good">Yes</td><td>Cheapest/simplest predictable VPS; ideal MVP.</td></tr>
+  <tr><td>Cloudflare</td><td>Workers / Tunnel</td><td class="bad">No VM</td><td class="bad">No browser</td><td>Use Cloudflare <b>only as the tunnel</b> for remote view, not as host.</td></tr>
+  <tr><td>E2B / sandboxes</td><td>On-demand sandbox</td><td class="warn">Ephemeral</td><td class="good">Yes</td><td>Per-task, not 24/7. Good for the <b>lightweight</b> variant later.</td></tr>
+</table>
+
+<h2>4. Head-to-head for the 24/7 goal</h2>
+<table>
+  <tr><th>Dimension</th><th>Alibaba HK</th><th>AWS Lightsail/EC2</th><th>DigitalOcean</th><th>Fly.io</th></tr>
+  <tr><td>LLM/Telegram reachable</td><td class="good">Yes</td><td class="good">Yes</td><td class="good">Yes</td><td class="good">Yes</td></tr>
+  <tr><td>Latency from China</td><td class="good">Excellent</td><td class="warn">OK (us-west/SG)</td><td class="warn">OK (SGP1)</td><td class="warn">OK</td></tr>
+  <tr><td>Pay from China</td><td class="good">Easy (CN acct)</td><td class="warn">Intl card</td><td class="warn">Intl card</td><td class="warn">Intl card</td></tr>
+  <tr><td>~$/mo (2GB)</td><td>~$10–15</td><td>~$7–10</td><td class="good">~$6</td><td>~$5–10</td></tr>
+  <tr><td>Persistent disk</td><td class="good">Yes</td><td class="good">Yes</td><td class="good">Yes</td><td class="good">Yes</td></tr>
+  <tr><td>Lightweight path later</td><td class="warn">manual</td><td class="warn">manual</td><td class="warn">manual</td><td class="good">scale-to-zero</td></tr>
+  <tr><td>Verdict</td><td class="good">Best CN-side</td><td class="good">Best global</td><td class="good">Cheapest MVP</td><td class="good">Best future</td></tr>
+</table>
+<div class="pick"><b>Recommendation:</b> Start on <b>DigitalOcean Singapore</b> or <b>AWS Lightsail</b> for the MVP (cheap, foreign-API reachable, dead simple). If China latency/payment becomes painful, mirror to <b>Alibaba Cloud Hong Kong</b>. Avoid mainland regions and Cloudflare-as-host. Implement both behind one abstraction so swapping is trivial.</div>
+
+<h2>5. Persistent now, lightweight later</h2>
+<div class="grid">
+  <div class="card"><div class="tag">Phase 1 — now</div><h3>Persistent server</h3><p>One always-on VPS. Headful Chrome + persistent profile stays warm → instant tasks, sessions survive, simplest to reason about. Cost ~$6–15/mo. Right for M1–M5.</p></div>
+  <div class="card"><div class="tag">Phase 2 — later</div><h3>Lightweight on-demand</h3><p>Spin a sandbox (Fly Machine / E2B) per task, restore profile from object storage, tear down. Pay only when working. Cost approaches $0 idle, but cold-start + state restore add latency. Worth it only if the box is mostly idle.</p></div>
+</div>
+<p>Verdict: <b>persistent first</b> — a single user's bot is idle most of the day but cheap enough that on-demand complexity isn't justified yet. Keep the door open via the abstraction below.</p>
+
+<h2>6. The host abstraction (implement both)</h2>
+<pre>class HostProvider(Protocol):
+    async def ensure_running(self) -> None: ...      # boot/keep node alive
+    async def profile_dir(self) -> str: ...          # persistent Chrome profile path
+    async def restore_state(self) -> None: ...       # pull profile/workspace
+    async def persist_state(self) -> None: ...       # push profile/workspace
+    async def expose(self, port:int) -> str: ...     # tunnel → short-lived URL
+    async def teardown(self) -> None: ...            # noop (persistent) / kill (light)
+
+PersistentVpsHost   # DO/AWS/Aliyun HK: local disk, no teardown, tunnel
+OnDemandSandboxHost # Fly/E2B: object-store profile, expose, teardown</pre>
+<p>The runner depends only on <code>HostProvider</code>; persistent vs lightweight and CN vs global become config, not code.</p>
+
+<h2>7. China-specific cautions</h2>
+<ul>
+  <li class="warn">Mainland ECS cannot reach Anthropic/OpenAI/Telegram → use HK/SG region.</li>
+  <li>No ICP filing needed: remote view goes over Cloudflare Tunnel (egress only).</li>
+  <li>Cross-border payments: Alibaba/Tencent accept CN cards; global providers need an international card.</li>
+  <li>Keep targets ToS-clean; no evasion (matches platform non-goals).</li>
+</ul>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Python asyncio for Java Developers — Study Notes</title>
+<style>
+  :root{
+    --bg:#0f1115;--panel:#171a21;--panel2:#1d2129;--ink:#e8eaed;--muted:#9aa3b2;
+    --line:#2a2f3a;--accent:#5b9cff;--good:#3ec28f;--warn:#f0b542;--bad:#f06d6d;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  header{padding:38px 32px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#141821,#0f1115)}
+  h1{margin:0 0 6px;font-size:27px}.sub{color:var(--muted);font-size:14px}
+  main{max-width:1000px;margin:0 auto;padding:26px 24px 80px}
+  h2{margin:40px 0 12px;font-size:21px;border-left:4px solid var(--accent);padding-left:12px}
+  h3{margin:22px 0 8px;font-size:16px;color:#cdd6e6}
+  p{color:#d5dae3}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.8px;background:var(--panel);border-radius:10px;overflow:hidden}
+  th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:var(--panel2);color:#cfe0ff}tr:last-child td{border-bottom:none}
+  code{background:#11151c;border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:13px;color:#9fd0ff}
+  pre{background:#0c0f14;border:1px solid var(--line);border-radius:10px;padding:16px;overflow:auto;font-size:13px;color:#cdd6e6}
+  .good{color:var(--good);font-weight:600}.warn{color:var(--warn);font-weight:600}.bad{color:var(--bad);font-weight:600}
+  .note{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:14px 0;color:var(--muted)}
+  .key{background:linear-gradient(90deg,#16241c,#171a21);border:1px solid #2f6b4d;border-radius:10px;padding:14px 16px;margin:14px 0}
+  ul{margin:8px 0 8px 18px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Python <code>asyncio</code> for Java Developers</h1>
+  <div class="sub">Study notes · async/await, the event loop, Callable/Awaitable, and pause/resume — mapped to Java · BrowserUseBot</div>
+</header>
+<main>
+
+<h2>1. The core mental shift</h2>
+<table>
+  <tr><th></th><th>Java</th><th>Python asyncio</th></tr>
+  <tr><td>Workers</td><td>Many threads</td><td>One thread</td></tr>
+  <tr><td>Switching</td><td>OS preempts anytime</td><td>Only at <code>await</code> (cooperative)</td></tr>
+  <tr><td>Shared data</td><td>Needs locks / synchronized</td><td>Usually no locks (one thread)</td></tr>
+  <tr><td>Style</td><td>Parallelism</td><td>Concurrency (1 worker switching fast)</td></tr>
+</table>
+<p>Shift: one thread juggles many tasks. It runs one task until that task voluntarily says "I'm waiting" via <code>await</code>, then runs others. No preemption.</p>
+
+<h2>2. What <code>await</code> means</h2>
+<pre>x = await fetchData()   # run it, suspend here until done, free the thread, then x = real value</pre>
+<p>Like Java <code>CompletableFuture</code> chaining but top-to-bottom:</p>
+<pre>// Java
+fetchData().thenCompose(x -&gt; process(x)).thenAccept(r -&gt; use(r));
+
+# Python
+x = await fetchData()
+r = await process(x)
+use(r)</pre>
+<p><code>await</code> ≈ <code>future.join()/get()</code> — but it does <b>not</b> block the thread; it frees it for other tasks.</p>
+
+<h2>3. What if you DROP await?</h2>
+<pre>x = fetchData()   # x is a &lt;coroutine object&gt;, NOTHING ran yet
+r = process(x)    # passing a recipe as data → bug
+use(r)            # ⚠ warning: coroutine 'fetchData' was never awaited</pre>
+<p>A bare call returns a <b>paused recipe</b>, not the result. Like building a <code>CompletableFuture</code> and never joining it. <code>await</code> does two jobs: <b>drive to completion</b> + <b>unwrap result</b>.</p>
+<table>
+  <tr><th>Code</th><th>Effect</th></tr>
+  <tr><td><code>await f()</code></td><td class="good">run now + get value</td></tr>
+  <tr><td><code>asyncio.create_task(f())</code></td><td class="warn">run in background (like executor.submit)</td></tr>
+  <tr><td><code>f()</code> alone</td><td class="bad">never runs</td></tr>
+</table>
+
+<h2>4. Callable / Awaitable / CompletableFuture</h2>
+<table>
+  <tr><th>Python</th><th>Java</th><th>Meaning</th></tr>
+  <tr><td>Callable</td><td>Runnable / Function / Callable&lt;T&gt;</td><td>Call it now: <code>f(x)</code>, sync, returns value.</td></tr>
+  <tr><td>Awaitable</td><td>CompletableFuture&lt;T&gt;</td><td>Awaitable future result; a coroutine is awaitable.</td></tr>
+  <tr><td>coroutine/Future</td><td>CompletableFuture</td><td>Promise of a value-to-come.</td></tr>
+</table>
+<p>Hook type <code>Callable[[Agent], Awaitable[None]]</code> = takes an Agent, returns an awaitable → <code>async def hook(agent): ...</code>. Java: <code>Function&lt;Agent, CompletableFuture&lt;Void&gt;&gt;</code>.</p>
+
+<h2>5. Event loop = 1 thread + work queue</h2>
+<p>Like an <code>ExecutorService</code> with exactly one worker: a task runs until <code>await</code>, parks itself ("wake me when this Future is done"), yields, worker grabs next. <code>await event.wait()</code> = "park me; mark ready on <code>event.set()</code>" — Java's <code>wait()/notify()</code> without blocking a thread.</p>
+
+<h2>6. Pause/resume via asyncio.Event (our login handoff)</h2>
+<pre>async def run():
+    while not done:
+        if paused:
+            await event.wait()   # parks task, frees thread
+        await step()
+
+def resume():
+    event.set()                  # sync flip → marks parked task ready</pre>
+<ul>
+  <li><code>pause()</code>/<code>resume()</code> are sync because <code>set()/clear()</code> just flip a flag.</li>
+  <li>Both run on the same thread, so <code>resume()</code> can't interrupt <code>run</code> mid-line → no lock needed.</li>
+  <li class="warn">Exception: cross-thread → use <code>loop.call_soon_threadsafe(event.set)</code>.</li>
+</ul>
+
+<div class="key"><b>One line:</b> await = cooperative pause point; event loop = one thread running tasks until they await; asyncio.Event = wait()/notify() without blocking a thread. Concurrency, not parallelism.</div>
+
+</main>
+</body>
+</html>
