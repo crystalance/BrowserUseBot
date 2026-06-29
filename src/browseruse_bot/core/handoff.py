@@ -31,7 +31,7 @@ class Handoff:
     def __init__(
         self,
         policy: TaskPolicy,
-        on_login_required: Callable[[str], Awaitable[None]] | None = None,
+        on_login_required: Callable[[str, object], Awaitable[None]] | None = None,
     ) -> None:
         self.policy = policy
         self._on_login_required = on_login_required
@@ -66,7 +66,7 @@ class Handoff:
             self._resume.clear()
             logger.info("🔐 login_required at %s", url)
             if self._on_login_required:
-                await self._on_login_required(url)
+                await self._on_login_required(url, agent)
             agent.pause()
             await self._resume.wait()
             agent.resume()

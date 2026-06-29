@@ -31,7 +31,7 @@ class BrowserAgentRunner:
         profile_dir: str = "./workspace/profile",
         max_steps: int = 25,
         headless: bool = False,
-        on_login_required: Callable[[str], Awaitable[None]] | None = None,
+        on_login_required: Callable[[str, object], Awaitable[None]] | None = None,
     ) -> None:
         self._llm = llm
         self._profile_dir = str(Path(profile_dir).expanduser().resolve())
