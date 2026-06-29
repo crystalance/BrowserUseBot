@@ -9,7 +9,8 @@ for the supervised on-call agent. See `designDoc/` for the full design.
 - **M2** Login handoff (pause → ask human → resume). ✅
 - **M3** Telegram gateway (`/new`, `/done`, `/status`). ✅
 - **M4** CDP-screencast remote view + Cloudflare tunnel link. ✅
-- Next: M5 reliability/eval.
+- **M5** Reliability: SQLite run records + metrics (`/stats`). ✅
+- Next: M6 interview-ingest module.
 
 ## Run the Telegram bot
 ```pwsh

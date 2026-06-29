@@ -37,6 +37,7 @@ class Handoff:
         self._on_login_required = on_login_required
         self._resume = asyncio.Event()
         self.needed_human = False
+        self._handled = False  # only hand off once per task
 
     def signal_done(self) -> None:
         """Platform calls this when the human finished logging in (/done)."""
@@ -47,8 +48,22 @@ class Handoff:
             return True  # empty allow-list = unrestricted
         return any(host == h or host.endswith("." + h) for h in self.policy.allowed_hosts)
 
-    def _is_login_wall(self, url: str) -> bool:
-        return any(m in url.lower() for m in _LOGIN_MARKERS)
+    def _is_login_host(self, host: str) -> bool:
+        return any(host == h or host.endswith("." + h) for h in self.policy.login_hosts)
+
+    async def _is_login_wall(self, url: str, agent) -> bool:
+        if any(m in url.lower() for m in _LOGIN_MARKERS):
+            return True
+        if self._is_login_host(_host(url)):
+            return True
+        try:  # DOM check: a password field means a login form
+            state = await agent.browser_session.get_browser_state_summary(cached=True)
+            for el in (state.dom_state.selector_map or {}).values():
+                if (el.attributes or {}).get("type") == "password":
+                    return True
+        except Exception:  # noqa: BLE001
+            pass
+        return False
 
     async def on_step_start(self, agent) -> None:
         url = await agent.browser_session.get_current_page_url()
@@ -60,13 +75,14 @@ class Handoff:
             agent.stop()
             return
 
-        # M2: login handoff
-        if self._is_login_wall(url):
+        # M2: login handoff (once per task)
+        if not self._handled and await self._is_login_wall(url, agent):
+            self._handled = True
             self.needed_human = True
             self._resume.clear()
             logger.info("🔐 login_required at %s", url)
             if self._on_login_required:
                 await self._on_login_required(url, agent)
-            agent.pause()
+            # Awaiting here pauses the agent between steps WITHOUT browser-use's
+            # interactive pause() (which would block the event loop on stdin).
             await self._resume.wait()
-            agent.resume()

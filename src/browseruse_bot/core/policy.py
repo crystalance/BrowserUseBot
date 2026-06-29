@@ -13,3 +13,7 @@ from dataclasses import dataclass, field
 class TaskPolicy:
     allowed_hosts: list[str] = field(default_factory=list)
     require_approval_for_writes: bool = True
+    # Hosts that require a human login handoff (deterministic trigger).
+    login_hosts: list[str] = field(
+        default_factory=lambda: ["xiaohongshu.com", "linkedin.com", "twitter.com", "x.com"]
+    )

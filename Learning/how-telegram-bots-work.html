@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>How Telegram Bots Work</title>
+<style>
+  :root{--bg:#0f1115;--panel:#171a21;--panel2:#1d2129;--ink:#e8eaed;--muted:#9aa3b2;
+    --line:#2a2f3a;--accent:#5b9cff;--good:#3ec28f;--warn:#f0b542;--bad:#f06d6d;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  header{padding:38px 32px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#141821,#0f1115)}
+  h1{margin:0 0 6px;font-size:27px}.sub{color:var(--muted);font-size:14px}
+  main{max-width:1000px;margin:0 auto;padding:26px 24px 80px}
+  h2{margin:40px 0 12px;font-size:21px;border-left:4px solid var(--accent);padding-left:12px}
+  p{color:#d5dae3}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.8px;background:var(--panel);border-radius:10px;overflow:hidden}
+  th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line)}th{background:var(--panel2);color:#cfe0ff}
+  code{background:#11151c;border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:13px;color:#9fd0ff}
+  pre{background:#0c0f14;border:1px solid var(--line);border-radius:10px;padding:16px;overflow:auto;font-size:13px;color:#cdd6e6}
+  .good{color:var(--good);font-weight:600}.warn{color:var(--warn);font-weight:600}
+  .note{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:14px 0;color:var(--muted)}
+  .key{background:linear-gradient(90deg,#16241c,#171a21);border:1px solid #2f6b4d;border-radius:10px;padding:14px 16px;margin:14px 0}
+  ul{margin:8px 0 8px 18px}
+</style>
+</head>
+<body>
+<header>
+  <h1>How Telegram Bots Work</h1>
+  <div class="sub">The bot runs anywhere; the phone never talks to it directly — Telegram's cloud is the middleman · BrowserUseBot</div>
+</header>
+<main>
+
+<h2>1. The key idea</h2>
+<p>Your phone never connects to your bot. Both connect to <b>Telegram's servers</b> in the middle. Your Python code only talks to <code>api.telegram.org</code>. So yes: write the bot in Python, run it anywhere with internet (laptop, AWS, anything) — as long as it's running, your phone gets replies.</p>
+<pre>📱 Phone app ──► Telegram Cloud ◄── Your Python bot (laptop / AWS)
+                (api.telegram.org)
+        message              the bot polls + replies</pre>
+
+<h2>2. The two pieces</h2>
+<table>
+<tr><th>Piece</th><th>Role</th></tr>
+<tr><td>BotFather token</td><td>Identity + password for your bot. Code uses it to authenticate to the API.</td></tr>
+<tr><td>Telegram cloud</td><td>Stores messages, routes them between phone and bot. Always online.</td></tr>
+<tr><td>Your bot process</td><td>Asks the cloud "any new messages?", does work, posts replies back.</td></tr>
+</table>
+
+<h2>3. Two ways to receive messages</h2>
+<table>
+<tr><th></th><th>Long polling (we use this)</th><th>Webhook</th></tr>
+<tr><td>How</td><td>Bot repeatedly asks <code>getUpdates</code></td><td>Telegram pushes to your public URL</td></tr>
+<tr><td>Public IP?</td><td class="good">No — outbound only</td><td class="warn">Yes (HTTPS endpoint)</td></tr>
+<tr><td>Best for</td><td>Laptop / behind NAT / MVP</td><td>High scale on a server</td></tr>
+</table>
+<p>Long polling is why our bot works from your PC with no domain: it dials out, never needs incoming connections.</p>
+
+<h2>4. The loop (what run_polling does)</h2>
+<pre>while running:
+    updates = GET api.telegram.org/bot&lt;token&gt;/getUpdates   # waits for new msgs
+    for u in updates:
+        if u == "/new ...": run task; POST sendMessage(reply)</pre>
+
+<h2>5. Answering your question</h2>
+<ul>
+  <li class="good">Write bot in Python ✔ — deploy anywhere with internet.</li>
+  <li class="good">Only if it's running do you get replies ✔ — stop the process, bot goes silent; messages queue in the cloud until it returns.</li>
+  <li class="good">No domain/IP needed (long polling). A domain only matters for webhooks or the remote-view link.</li>
+</ul>
+
+<div class="key"><b>One line:</b> Phone ↔ Telegram cloud ↔ your bot. Token authenticates; long polling pulls messages out via outbound HTTPS, so the bot runs anywhere and replies as long as it's alive.</div>
+
+</main>
+</body>
+</html>
