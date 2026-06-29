@@ -1,0 +1,24 @@
+[project]
+name = "browseruse-bot"
+version = "0.0.1"
+description = "Supervised browser-agent platform: thin runner wrapping browser-use with human-in-the-loop login handoff."
+requires-python = ">=3.11,<4.0"
+dependencies = [
+    "browser-use",
+    "python-dotenv>=1.0",
+    "azure-identity>=1.15",
+]
+
+[project.optional-dependencies]
+dev = ["ruff", "pytest", "pytest-asyncio"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
