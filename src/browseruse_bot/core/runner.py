@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -40,6 +41,25 @@ def _find_playwright_chromium() -> str | None:
     lin_base = Path.home() / ".cache" / "ms-playwright"
     lin = sorted(lin_base.glob("chromium-*/chrome-linux/chrome"), reverse=True)
     return str(lin[0]) if lin else None
+
+
+def _ensure_display() -> None:
+    """On Linux, a headful Chromium needs an X server via ``DISPLAY``.
+
+    When the bot is launched directly (not via ``scripts/run-aws.sh``),
+    ``DISPLAY`` is often unset, so Chromium can't connect to any X server and
+    ``BrowserStartEvent`` hangs until it times out. Default it to the virtual
+    display the noVNC stack uses (``DISPLAY_NUM``, else ``:99``) so headful runs
+    work regardless of entry point. No-op on non-Linux or when already set.
+    """
+    if not sys.platform.startswith("linux"):
+        return
+    if os.environ.get("DISPLAY", "").strip():
+        return
+    num = os.getenv("DISPLAY_NUM", "99").lstrip(":")
+    display = f":{num}"
+    os.environ["DISPLAY"] = display
+    logger.warning("DISPLAY was unset; defaulting to %s for headful Chromium.", display)
 
 
 class BrowserAgentRunner:
@@ -90,11 +110,21 @@ class BrowserAgentRunner:
         policy = policy or TaskPolicy()
         Path(self._profile_dir).mkdir(parents=True, exist_ok=True)
 
+        if not self._headless:
+            _ensure_display()
+
         self.handoff = Handoff(policy, on_login_required=self._on_login_required)
         session = BrowserSession(
             headless=self._headless,
             user_data_dir=self._profile_dir,
             executable_path=self._executable_path,
+            # On Linux servers the Chromium sandbox needs unprivileged user
+            # namespaces, which Ubuntu blocks by default
+            # (kernel.apparmor_restrict_unprivileged_userns=1). Without this
+            # flag Chrome aborts on launch, so its CDP port never opens and
+            # BrowserStartEvent times out after 30s. browser-use does not add
+            # it by default; we must.
+            args=(["--no-sandbox"] if sys.platform.startswith("linux") else None),
         )
         agent = Agent(
             task=goal,

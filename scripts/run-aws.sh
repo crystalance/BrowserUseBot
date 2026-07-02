@@ -34,4 +34,11 @@ if ! pgrep -f "Xvfb :$DISPLAY_NUM" >/dev/null; then
 fi
 
 echo "==> Starting bot (HANDOFF=novnc)"
-exec python -m browseruse_bot.platform.telegram_gateway
+# Prefer the project venv's interpreter; fall back to whatever python is on PATH.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ -x "$ROOT/.venv/bin/python" ]; then
+  PY="$ROOT/.venv/bin/python"
+else
+  PY="$(command -v python3 || command -v python)"
+fi
+exec "$PY" -m browseruse_bot.platform.telegram_gateway
