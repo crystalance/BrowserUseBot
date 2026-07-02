@@ -13,9 +13,22 @@ import os
 
 
 def build_llm():
-    """Construct a chat model from env. Azure AAD preferred; Anthropic fallback."""
+    """Construct a chat model from env. OpenAI > Azure AAD > Anthropic.
+
+    Set LLM_PROVIDER=openai|azure|anthropic to force one explicitly.
+    """
+    provider = os.getenv("LLM_PROVIDER", "").strip().lower()
+
+    if provider == "openai" or (not provider and os.getenv("OPENAI_API_KEY")):
+        from browser_use import ChatOpenAI
+
+        return ChatOpenAI(
+            model=os.getenv("OPENAI_MODEL", "gpt-4o"),
+            api_key=os.getenv("OPENAI_API_KEY"),
+        )
+
     endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "").split(",")[0].strip()
-    if endpoint:
+    if provider == "azure" or (not provider and endpoint):
         from azure.identity import AzureCliCredential, get_bearer_token_provider
         from browser_use.llm.azure.chat import ChatAzureOpenAI
 

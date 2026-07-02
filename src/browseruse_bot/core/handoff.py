@@ -38,9 +38,15 @@ class Handoff:
         self._resume = asyncio.Event()
         self.needed_human = False
         self._handled = False  # only hand off once per task
+        self._stopped = False  # set by signal_stop()
 
     def signal_done(self) -> None:
         """Platform calls this when the human finished logging in (/done)."""
+        self._resume.set()
+
+    def signal_stop(self) -> None:
+        """Platform calls this on /stop: release any login wait and mark stopped."""
+        self._stopped = True
         self._resume.set()
 
     def _host_allowed(self, host: str) -> bool:
@@ -66,6 +72,9 @@ class Handoff:
         return False
 
     async def on_step_start(self, agent) -> None:
+        if self._stopped:
+            agent.stop()
+            return
         url = await agent.browser_session.get_current_page_url()
         host = _host(url)
 
@@ -86,3 +95,5 @@ class Handoff:
             # Awaiting here pauses the agent between steps WITHOUT browser-use's
             # interactive pause() (which would block the event loop on stdin).
             await self._resume.wait()
+            if self._stopped:
+                agent.stop()

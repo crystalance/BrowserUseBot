@@ -1,0 +1,5 @@
+1. persistent profile  -- DONE (profile dir renamed to browser-use-user-data-dir-main so browser-use stops copying it to a temp dir)
+2. import skills
+3. gpt-5.4 emits malformed JSON ("trailing characters") -> agent fails 5x and stops. Try gpt-4o or add fallback_llm.
+4. screenshot/click timeouts on slow sites (小红书 creator pages) -- consider raising CDP timeouts.
+5. AWS: noVNC login handoff (see designDoc/deployToAWS) + bind 0.0.0.0 + PUBLIC_HOST + URL token.

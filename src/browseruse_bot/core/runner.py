@@ -8,6 +8,7 @@ per-step hook (pause → ask human → resume). The signature is final.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -24,14 +25,21 @@ logger = logging.getLogger("browseruse_bot")
 
 
 def _find_playwright_chromium() -> str | None:
-    """Locate the full (headful-capable) Playwright Chromium, never Edge.
+    """Locate a headful-capable Chromium binary, never Edge.
 
-    Returns the highest-versioned ``chrome-win64\\chrome.exe`` under the
-    ms-playwright cache, or ``None`` if not installed.
+    Order: ``BROWSER_EXECUTABLE_PATH`` env override → Playwright cache
+    (Windows or Linux) → ``None`` (let browser-use manage its own).
     """
+    env = os.getenv("BROWSER_EXECUTABLE_PATH", "").strip()
+    if env:
+        return env
     base = Path.home() / "AppData" / "Local" / "ms-playwright"
-    candidates = sorted(base.glob("chromium-*/chrome-win64/chrome.exe"), reverse=True)
-    return str(candidates[0]) if candidates else None
+    win = sorted(base.glob("chromium-*/chrome-win64/chrome.exe"), reverse=True)
+    if win:
+        return str(win[0])
+    lin_base = Path.home() / ".cache" / "ms-playwright"
+    lin = sorted(lin_base.glob("chromium-*/chrome-linux/chrome"), reverse=True)
+    return str(lin[0]) if lin else None
 
 
 class BrowserAgentRunner:
@@ -41,7 +49,7 @@ class BrowserAgentRunner:
         self,
         *,
         llm=None,
-        profile_dir: str = "./workspace/profile_main",
+        profile_dir: str = "./workspace/browser-use-user-data-dir-main",
         max_steps: int = 25,
         headless: bool = False,
         executable_path: str | None = None,
@@ -49,6 +57,10 @@ class BrowserAgentRunner:
         on_login_required: Callable[[str, object], Awaitable[None]] | None = None,
     ) -> None:
         self._llm = llm
+        # NOTE: the dir name MUST contain "browser-use-user-data-dir-" so
+        # browser-use treats it as already-persistent and does NOT copy it to a
+        # throwaway temp dir each run (_copy_profile() does that for any
+        # Chrome/Chromium executable, which silently discards saved logins).
         self._profile_dir = str(Path(profile_dir).expanduser().resolve())
         self._max_steps = max_steps
         self._headless = headless
@@ -56,7 +68,23 @@ class BrowserAgentRunner:
         self._use_vision = use_vision
         self._on_login_required = on_login_required
         self.handoff: Handoff | None = None  # set per-run; platform calls signal_done()
+        self._agent: Agent | None = None  # active agent, for stop()
         self.store = RunStore()
+
+    def stop(self) -> None:
+        """Stop the current job immediately (idempotent; safe if nothing runs).
+
+        Releases a login-wall wait so a paused agent can unwind, then asks the
+        agent to stop. No-op when no task is active.
+        """
+        if self.handoff:
+            self.handoff.signal_stop()
+        agent = self._agent
+        if agent is not None:
+            try:
+                agent.stop()
+            except Exception:  # noqa: BLE001
+                pass
 
     async def run_task(self, goal: str, policy: TaskPolicy | None = None) -> Result:
         policy = policy or TaskPolicy()
@@ -74,9 +102,13 @@ class BrowserAgentRunner:
             browser_session=session,
             use_vision=self._use_vision,
         )
+        self._agent = agent
 
         t0 = time.perf_counter()
-        history = await agent.run(max_steps=self._max_steps, on_step_start=self.handoff.on_step_start)
+        try:
+            history = await agent.run(max_steps=self._max_steps, on_step_start=self.handoff.on_step_start)
+        finally:
+            self._agent = None
 
         result = Result(
             ok=bool(history.is_done() and history.is_successful() is not False),
