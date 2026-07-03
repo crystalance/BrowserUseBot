@@ -246,6 +246,67 @@ jobs:
 Store `EC2_HOST` + an SSH key as GitHub repo **secrets**. Push to `main` →
 auto-deploy.
 
+### 10.7 One-time setup to enable push-to-deploy (IMPLEMENTED)
+`scripts/deploy.sh` and `.github/workflows/deploy.yml` are committed. The
+workflow SSHes in and runs `deploy.sh` (fetch → `git reset --hard origin/main` →
+`pip install -e .` → `playwright install chromium` → restart service). Do this
+once on the box + in GitHub:
+
+**1. systemd service** (so deploy can restart the bot):
+```bash
+sudo tee /etc/systemd/system/browseruse.service >/dev/null <<'EOF'
+[Unit]
+Description=BrowserUse Telegram Bot
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/buBot/BrowserUseBot
+ExecStart=/usr/bin/bash scripts/run-aws.sh
+Restart=always
+RestartSec=5
+EnvironmentFile=/home/ubuntu/buBot/BrowserUseBot/.env
+
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo systemctl daemon-reload
+sudo systemctl enable --now browseruse
+```
+
+**2. Passwordless restart** (CI can't type a sudo password):
+```bash
+echo 'ubuntu ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart browseruse' \
+  | sudo tee /etc/sudoers.d/browseruse
+sudo chmod 440 /etc/sudoers.d/browseruse
+```
+
+**3. SSH key for GitHub Actions → server:**
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/gha_deploy -N ""
+cat ~/.ssh/gha_deploy.pub >> ~/.ssh/authorized_keys
+cat ~/.ssh/gha_deploy        # copy the PRIVATE key
+```
+
+**4. GitHub repo secrets** (Settings → Secrets and variables → Actions):
+| Name | Value |
+|------|-------|
+| `EC2_HOST` | `3.24.123.30` |
+| `EC2_USER` | `ubuntu` |
+| `EC2_SSH_KEY` | the private key from step 3 (full `-----BEGIN…END-----`) |
+
+**5. Test:** push to `main`, watch the repo **Actions** tab (or Actions → Deploy
+to AWS → Run workflow).
+
+Notes:
+- `deploy.sh` does `git reset --hard origin/main`, so leftover manual edits on the
+  server are replaced by the repo version. `.env`, `workspace/`, and the profile
+  are git-ignored and survive.
+- Shell scripts are pinned to LF via `.gitattributes` (avoids CRLF `bad
+  interpreter` errors on Linux).
+- Stop any manual `run-aws.sh` before `systemctl enable --now` so they don't
+  collide on the display/port.
+
 ### Recommended order
 1. **Now:** deploy key + `uv sync` + systemd + `scripts/deploy.sh` (manual).
 2. **When stable:** add the GitHub Actions workflow for push-to-deploy.
