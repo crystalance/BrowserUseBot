@@ -21,4 +21,6 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             cd ~/buBot/BrowserUseBot
-            ./scripts/deploy.sh
+            git fetch --all --tags --prune
+            git reset --hard origin/main
+            bash scripts/deploy.sh
