@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BrowserUseBot — Run trajectory</title>
+<style>
+  :root { --bg:#0f1117; --card:#171a23; --mut:#8b93a7; --acc:#5b9dff; --ok:#2ecc71; --err:#ff6b6b; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:#e6e9ef; font:14px/1.55 -apple-system,Segoe UI,Roboto,sans-serif; }
+  header { padding:24px 28px; border-bottom:1px solid #232838; position:sticky; top:0; background:var(--bg); z-index:2; }
+  h1 { margin:0 0 6px; font-size:20px; }
+  .goal { color:var(--mut); }
+  .badge { display:inline-block; padding:3px 10px; border-radius:999px; font-weight:600; font-size:12px; }
+  .bok { background:rgba(46,204,113,.15); color:var(--ok); }
+  .bfail { background:rgba(255,107,107,.15); color:var(--err); }
+  main { max-width:920px; margin:0 auto; padding:22px 18px 60px; }
+  .step { display:flex; gap:14px; background:var(--card); border:1px solid #232838; border-left:3px solid var(--acc); border-radius:10px; padding:14px 16px; margin:12px 0; }
+  .step.err { border-left-color:var(--err); }
+  .sn { min-width:64px; font-weight:700; color:var(--acc); }
+  .step.err .sn { color:var(--err); }
+  .body { flex:1; }
+  .body > div { margin:3px 0; }
+  .eval { color:#cdd3e0; } .mem { color:var(--mut); font-size:13px; }
+  .goal { color:#e6e9ef; }
+  .action { background:#0d1a2e; border:1px solid #1e3a5f; border-radius:6px; padding:6px 9px; font-family:ui-monospace,Consolas,monospace; font-size:12.5px; overflow-x:auto; }
+  .act { color:var(--acc); font-weight:700; } .pv { color:#9fe6b0; }
+  .err { background:rgba(255,107,107,.08); border:1px solid #3a2330; border-radius:6px; padding:6px 9px; color:#ffb3b3; font-family:ui-monospace,monospace; font-size:12.5px; }
+  .ok { background:rgba(46,204,113,.06); border:1px solid #1f3a2c; border-radius:6px; padding:6px 9px; font-family:ui-monospace,monospace; font-size:12.5px; white-space:pre-wrap; }
+  .result { background:var(--card); border:1px solid #232838; border-radius:10px; padding:16px 18px; margin-top:18px; }
+  .result h2 { margin:0 0 10px; font-size:16px; }
+  .stats { color:var(--mut); font-size:13px; margin-top:6px; }
+  details.skill { margin-top:8px; color:var(--mut); font-size:12.5px; }
+  details.skill summary { cursor:pointer; color:var(--acc); }
+  details.skill pre { white-space:pre-wrap; background:var(--card); border:1px solid #232838; border-radius:8px; padding:10px 12px; margin:8px 0 0; max-height:260px; overflow:auto; }
+</style></head>
+<body>
+<header>
+  <h1>BrowserUseBot — CodeAct run trajectory <span class="badge bok">SUCCESS ✅</span></h1>
+  <div class="goal">🎯 帮我去小红书上查找并整理一下2025-2026年关于bloomberg sde ng的面经,以文字形式返回给我，需要带上对原post的链接</div>
+  <details class='skill'><summary>Skill instructions (injected)</summary><pre>Follow this skill &#x27;Xiaohongshu Search&#x27; to accomplish the user&#x27;s request.
+- Stay ON xiaohongshu.com the whole time. Do NOT use external search engines
+  (Google/Bing/DuckDuckGo) — Xiaohongshu blocks search-engine indexing, so
+  `site:xiaohongshu.com` queries return nothing. External search is a dead end.
+- If not logged in, wait for the human login handoff, then continue.
+- Use the on-site search box (搜索) at the top. Type the user&#x27;s keywords and submit.
+- BULK-HARVEST WITH ONE `run_js` CALL (do this instead of many find_elements /
+  extract steps). On the results page, write ONE JavaScript snippet that returns
+  an array of {title, href} for every result card, e.g.:
+    (() =&gt; Array.from(document.querySelectorAll(&#x27;a[href*=&quot;/search_result/&quot;], a[href*=&quot;/explore/&quot;], a[href*=&quot;/discovery/item/&quot;]&#x27;))
+      .map(a =&gt; ({ title: (a.innerText||&quot;&quot;).trim(), href: a.href }))
+      .filter(x =&gt; x.title))
+  Scroll down 1–2 times and re-run the snippet to gather more cards. Xiaohongshu
+  search-result links look like `/search_result/&lt;id&gt;?xsec_token=…` — accept that
+  form; do not insist on `/explore/&lt;id&gt;`.
+- The `href` you collect from `run_js` IS the real, verifiable post link — no need
+  to open each post just to get its URL.
+- Open only the top ~3 most relevant posts to add a 1–2 line content summary; for
+  the rest, the title + harvested link is enough.
+- Cap the result at the top ~8 most relevant posts so you finish promptly.
+- If a keyword yields too few results, try simpler/broader variants (company name
+  alone, &quot;面经&quot;, &quot;面试&quot;, &quot;new grad&quot;, &quot;NG&quot;).
+- Return a text list: for each post → title, 1–2 line summary (if opened), and the
+  real xiaohongshu.com link from the harvested href. Never fabricate links.</pre></details>
+  <div class="stats">Steps: 25 · needed_human: True · model: Azure gpt-5.4 · tool: run_js (CodeAct)</div>
+</header>
+<main>
+  
+    <div class="step err">
+      <div class="sn">Step 1</div>
+      <div class="body">
+        
+        
+        
+        
+        <div class='err'>❌ Failed to invoke the Azure CLI</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 2</div>
+      <div class="body">
+        <div class="eval">👁 No browser action was completed previously; only the output format failed. Verdict: Failure in formatting, no task progress yet.</div>
+        <div class="mem">🧠 Starting fresh from about:blank. Need to remain on xiaohongshu.com only, verify load/login state, then use onsite search for Bloomberg SDE NG interview posts from 2025–2026.</div>
+        <div class="goal">🎯 Navigate to Xiaohongshu homepage and inspect whether the page loads and requires login before searching.</div>
+        <div class="action">▶ <span class='act'>navigate</span>(url=<span class='pv'>https://www.xiaohongshu.com/</span>, new_tab=<span class='pv'>False</span>)</div>
+        <div class='ok'>📄 🔗 Navigated to https://www.xiaohongshu.com/</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 3</div>
+      <div class="body">
+        <div class="eval">👁 Successfully opened xiaohongshu.com and confirmed the site is usable with a visible search box; verdict: Success.</div>
+        <div class="mem">🧠 On xiaohongshu.com homepage/explore. No blocking login prompt is visible yet. Next I will use the top search box with Bloomberg SDE NG interview-related keywords.</div>
+        <div class="goal">🎯 Enter a Bloomberg SDE NG interview keyword into the Xiaohongshu search box and submit the search.</div>
+        <div class="action">▶ <span class='act'>input</span>(index=<span class='pv'>3873</span>, text=<span class='pv'>bloomberg sde ng 面经</span>, clear=<span class='pv'>True</span>)</div><div class="action">▶ <span class='act'>send_keys</span>(keys=<span class='pv'>Enter</span>)</div>
+        <div class='ok'>📄 Typed &#x27;bloomberg sde ng 面经&#x27;</div><div class='ok'>📄 Sent keys: Enter</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 4</div>
+      <div class="body">
+        <div class="eval">👁 The onsite search appears to have succeeded because the page now shows search-result tabs and filters with the query preserved in the search box. Verdict: Success.</div>
+        <div class="mem">🧠 We are on Xiaohongshu search results for &#x27;bloomberg sde ng 面经&#x27;. No login blocker is visible. Next I need to harvest result titles and hrefs via one run_js call before scrolling for more.</div>
+        <div class="goal">🎯 Harvest the current Xiaohongshu search results&#x27; titles and links with one run_js call.</div>
+        <div class="action">▶ <span class='act'>run_js</span>(code=<span class='pv'>(() =&gt; Array.from(document.querySelectorAll(&#x27;a[href*=&quot;/search_result/&quot;], a[href*=&quot;/explore/&quot;], a[href*=&quot;/discovery/item/…</span>)</div>
+        <div class='ok'>📄 [{&quot;title&quot;: &quot;Bloomberg 26 NG SWE 过经+Timeline&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/6919cd18000000000d03ba63?xsec_token=AB_cwVx9Ah9g0yz7-joBri8JyveFsQWrnDZBc0QhiqVfc=&amp;xsec_source=&quot;}, {&quot;title&quot;: &quot;Bloomberg SDE NG 7.22 面经分享&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/6883193000000000100262e9?xsec_token=ABPtW-hmI3HUQzrqthDVOzwilUGdYLvNgBonJ34YtjiUM=&amp;xsec_source=&quot;}, {&quot;title&quot;: &quot;Bloomberg ng sde tl面经&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/69ab1b65000000002a03b285?xsec_token=ABNdqqMWEA4cKow3pC5YqGGPSnnRAkdRCP1HpKtoxC7A4=&amp;xsec_source=&quot;}, {&quot;title&quot;: &quot;Bloomberg sde 26 ng 超绝新鲜面经&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/68e046a5000000000700c6ed?xsec_token=AB…</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 5</div>
+      <div class="body">
+        <div class="eval">👁 Successfully harvested a substantial first batch of Xiaohongshu search-result titles and hrefs with one run_js call. Verdict: Success.</div>
+        <div class="mem">🧠 Current search query is &#x27;bloomberg sde ng 面经&#x27; on Xiaohongshu. I already have 20 harvested title+link pairs from the first viewport, including several highly relevant 2025/26 NG Bloomberg SDE posts. Next I will scroll once and re-run bulk harvest to see if more relevant cards load.</div>
+        <div class="goal">🎯 Scroll down to load more Xiaohongshu result cards and re-run one bulk JavaScript harvest for additional titles and links.</div>
+        <div class="action">▶ <span class='act'>scroll</span>(down=<span class='pv'>True</span>, pages=<span class='pv'>1.0</span>)</div><div class="action">▶ <span class='act'>run_js</span>(code=<span class='pv'>(() =&gt; Array.from(document.querySelectorAll(&#x27;a[href*=&quot;/search_result/&quot;], a[href*=&quot;/explore/&quot;], a[href*=&quot;/discovery/item/…</span>)</div>
+        <div class='ok'>📄 🔍 Scrolled down 665px</div><div class='ok'>📄 [{&quot;title&quot;: &quot;Bloomberg 26 NG SWE 过经+Timeline&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/6919cd18000000000d03ba63?xsec_token=AB_cwVx9Ah9g0yz7-joBri8JyveFsQWrnDZBc0QhiqVfc=&amp;xsec_source=&quot;}, {&quot;title&quot;: &quot;Bloomberg SDE NG 7.22 面经分享&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/6883193000000000100262e9?xsec_token=ABPtW-hmI3HUQzrqthDVOzwilUGdYLvNgBonJ34YtjiUM=&amp;xsec_source=&quot;}, {&quot;title&quot;: &quot;Bloomberg ng sde tl面经&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/69ab1b65000000002a03b285?xsec_token=ABNdqqMWEA4cKow3pC5YqGGPSnnRAkdRCP1HpKtoxC7A4=&amp;xsec_source=&quot;}, {&quot;title&quot;: &quot;Bloomberg sde 26 ng 超绝新鲜面经&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/68e046a5000000000700c6ed?xsec_token=AB…</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 6</div>
+      <div class="body">
+        <div class="eval">👁 The previous goal is only partially complete: the page was scrolled successfully, but I have not yet re-run the bulk harvest JavaScript on the newly loaded results. Verdict: Partial success.</div>
+        <div class="mem">🧠 Still on Xiaohongshu search results for &#x27;bloomberg sde ng 面经&#x27;. First bulk harvest already returned 20 title+href pairs; after one scroll, more relevant Bloomberg 2025/2026 NG posts are visible and need to be harvested with a second run_js call.</div>
+        <div class="goal">🎯 Re-run one bulk JavaScript snippet on the current Xiaohongshu results page to harvest the loaded result titles and real hrefs after the scroll.</div>
+        <div class="action">▶ <span class='act'>run_js</span>(code=<span class='pv'>(() =&gt; Array.from(document.querySelectorAll(&#x27;a[href*=&quot;/search_result/&quot;], a[href*=&quot;/explore/&quot;], a[href*=&quot;/discovery/item/…</span>)</div>
+        <div class='ok'>📄 [{&quot;title&quot;: &quot;Bloomberg 26 NG SWE 过经+Timeline&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/6919cd18000000000d03ba63?xsec_token=AB_cwVx9Ah9g0yz7-joBri8JyveFsQWrnDZBc0QhiqVfc=&amp;xsec_source=&quot;}, {&quot;title&quot;: &quot;Bloomberg SDE NG 7.22 面经分享&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/6883193000000000100262e9?xsec_token=ABPtW-hmI3HUQzrqthDVOzwilUGdYLvNgBonJ34YtjiUM=&amp;xsec_source=&quot;}, {&quot;title&quot;: &quot;Bloomberg ng sde tl面经&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/69ab1b65000000002a03b285?xsec_token=ABNdqqMWEA4cKow3pC5YqGGPSnnRAkdRCP1HpKtoxC7A4=&amp;xsec_source=&quot;}, {&quot;title&quot;: &quot;Bloomberg sde 26 ng 超绝新鲜面经&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/68e046a5000000000700c6ed?xsec_token=AB…</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 7</div>
+      <div class="body">
+        <div class="eval">👁 The scroll succeeded earlier and the currently available harvested result set is sufficient, so I can move on; verdict: partial success but adequate for progress.</div>
+        <div class="mem">🧠 I am on Xiaohongshu search results for &#x27;bloomberg sde ng 面经&#x27; and already have a large harvested list of Bloomberg 25/26 NG SDE interview posts with real xiaohongshu.com search_result links. Next I will open three of the most relevant posts to gather short content summaries for the final response.</div>
+        <div class="goal">🎯 Open three highly relevant Bloomberg NG SDE interview posts from the harvested results in new Xiaohongshu tabs to capture brief summaries.</div>
+        <div class="action">▶ <span class='act'>navigate</span>(url=<span class='pv'>https://www.xiaohongshu.com/search_result/6919cd18000000000d03ba63?xsec_token=AB_cwVx9Ah9g0yz7-joBri8JyveFsQWrnDZBc0Qhiq…</span>, new_tab=<span class='pv'>True</span>)</div><div class="action">▶ <span class='act'>navigate</span>(url=<span class='pv'>https://www.xiaohongshu.com/search_result/6a34fb0d000000000d00bc00?xsec_token=ABNZWs8WX4ac0qQxawnE5WVYdkLy8a14q09JKQNb5d…</span>, new_tab=<span class='pv'>True</span>)</div><div class="action">▶ <span class='act'>navigate</span>(url=<span class='pv'>https://www.xiaohongshu.com/search_result/67a6ab6a000000002900fc34?xsec_token=AB4taAomlV8jkicqw1x_mQL7OK0Efe1I5sUgwZ5bHq…</span>, new_tab=<span class='pv'>True</span>)</div>
+        <div class='ok'>📄 🔗  Opened new tab with url https://www.xiaohongshu.com/search_result/6919cd18000000000d03ba63?xsec_token=AB_cwVx9Ah9g0yz7-joBri8JyveFsQWrnDZBc0QhiqVfc=&amp;xsec_source=</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 8</div>
+      <div class="body">
+        <div class="eval">👁 Successfully opened one highly relevant Xiaohongshu post and verified its content in the browser state. Verdict: Success.</div>
+        <div class="mem">🧠 One relevant post is verified: &#x27;Bloomberg 26 NG SWE 过经+Timeline&#x27; with visible interview timeline and preparation advice. I still need a fresh, grounded harvest of result titles+links from the results tab and 1–2 more opened posts for short summaries before composing the final list.</div>
+        <div class="goal">🎯 Switch back to the Xiaohongshu search results tab and bulk-harvest the visible result titles and hrefs with one run_js call.</div>
+        <div class="action">▶ <span class='act'>switch</span>(tab_id=<span class='pv'>BE46</span>)</div><div class="action">▶ <span class='act'>run_js</span>(code=<span class='pv'>(() =&gt; Array.from(document.querySelectorAll(&#x27;a[href*=&quot;/search_result/&quot;], a[href*=&quot;/explore/&quot;], a[href*=&quot;/discovery/item/…</span>)</div>
+        <div class='ok'>📄 Switched to tab #BE46</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 9</div>
+      <div class="body">
+        <div class="eval">👁 Switched back to the Xiaohongshu search results tab successfully, but the planned bulk-harvest has not yet been performed. Verdict: Partial success.</div>
+        <div class="mem">🧠 Still on Xiaohongshu results for &#x27;bloomberg sde ng 面经&#x27;. I have a visible pool of many relevant 2025–2026 NG/SDE Bloomberg posts; next I need a fresh grounded run_js harvest of title+real href on this tab before opening additional posts.</div>
+        <div class="goal">🎯 Run one JavaScript snippet on the Xiaohongshu results page to harvest visible result titles and real hrefs for the final shortlist.</div>
+        <div class="action">▶ <span class='act'>run_js</span>(code=<span class='pv'>(() =&gt; {
+  const anchors = Array.from(document.querySelectorAll(&#x27;a[href*=&quot;/search_result/&quot;], a[href*=&quot;/explore/&quot;], a[hre…</span>)</div>
+        <div class='ok'>📄 [{&quot;title&quot;: &quot;Bloomberg 26 NG SWE 过经+Timeline&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/6919cd18000000000d03ba63?xsec_token=AB_cwVx9Ah9g0yz7-joBri8JyveFsQWrnDZBc0QhiqVfc=&amp;xsec_source=&quot;}, {&quot;title&quot;: &quot;Bloomberg SDE NG 7.22 面经分享&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/6883193000000000100262e9?xsec_token=ABPtW-hmI3HUQzrqthDVOzwilUGdYLvNgBonJ34YtjiUM=&amp;xsec_source=&quot;}, {&quot;title&quot;: &quot;Bloomberg ng sde tl面经&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/69ab1b65000000002a03b285?xsec_token=ABNdqqMWEA4cKow3pC5YqGGPSnnRAkdRCP1HpKtoxC7A4=&amp;xsec_source=&quot;}, {&quot;title&quot;: &quot;Bloomberg sde 26 ng 超绝新鲜面经&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/68e046a5000000000700c6ed?xsec_token=AB…</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 10</div>
+      <div class="body">
+        <div class="eval">👁 The harvest is effectively successful because the read_state contains the bulk run_js output with many result titles and real Xiaohongshu links. Verdict: Success.</div>
+        <div class="mem">🧠 I have a grounded harvested pool of Bloomberg 2025–2026 NG/SDE interview posts from Xiaohongshu search results. One post tab is already open and needs direct content verification; then I need 1–2 more opened posts for short summaries before returning the top ~8 list.</div>
+        <div class="goal">🎯 Switch to the already opened Bloomberg post tab and extract enough on-page text to write a 1–2 line summary.</div>
+        <div class="action">▶ <span class='act'>switch</span>(tab_id=<span class='pv'>8DE0</span>)</div><div class="action">▶ <span class='act'>search_page</span>(pattern=<span class='pv'>Timeline</span>, regex=<span class='pv'>False</span>, case_sensitive=<span class='pv'>False</span>, context_chars=<span class='pv'>120</span>, max_results=<span class='pv'>10</span>)</div><div class="action">▶ <span class='act'>search_page</span>(pattern=<span class='pv'>VO|面经|OA|HR|EM|System Design|timeline</span>, regex=<span class='pv'>True</span>, case_sensitive=<span class='pv'>False</span>, context_chars=<span class='pv'>120</span>, max_results=<span class='pv'>20</span>)</div>
+        <div class='ok'>📄 Switched to tab #8DE0</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 11</div>
+      <div class="body">
+        <div class="eval">👁 Success: the opened Xiaohongshu post is visible and contains enough on-page text to write a grounded short summary.</div>
+        <div class="mem">🧠 Verified one relevant post in tab 8DE0: &#x27;Bloomberg 26 NG SWE 过经+Timeline&#x27; with timeline 9/23 invite, 10/2 tech1, 10/3 tech2, 10/22 tech3+HR, 11/5 manager+system design, 11/10 offer, plus prep advice. I still need a fresh grounded harvest of result titles+links from the results tab and 1–2 more opened posts for summaries.</div>
+        <div class="goal">🎯 Switch back to the Xiaohongshu search results tab and bulk-harvest current visible result titles and real hrefs with one run_js call.</div>
+        <div class="action">▶ <span class='act'>switch</span>(tab_id=<span class='pv'>BE46</span>)</div><div class="action">▶ <span class='act'>run_js</span>(code=<span class='pv'>(() =&gt; Array.from(document.querySelectorAll(&#x27;a[href*=&quot;/search_result/&quot;], a[href*=&quot;/explore/&quot;], a[href*=&quot;/discovery/item/…</span>)</div>
+        <div class='ok'>📄 Switched to tab #BE46</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 12</div>
+      <div class="body">
+        <div class="eval">👁 Switching back to the results context succeeded and the current page shows both the result list and an opened relevant Bloomberg post; verdict: Success.</div>
+        <div class="mem">🧠 Grounded summaries now available for at least two relevant posts: &#x27;Bloomberg 26 NG SWE 过经+Timeline&#x27; from tab 8DE0 and &#x27;Bloomberg 26ng vo2&#x27; from the current page modal. I still need one more opened post summary, ideally a 25NG or 26NG general面经 post from the visible result list, before composing the final top ~8 list.</div>
+        <div class="goal">🎯 Open one more highly relevant Bloomberg NG SDE result from the visible Xiaohongshu result list to capture a brief grounded summary.</div>
+        <div class="action">▶ <span class='act'>click</span>(index=<span class='pv'>10135</span>)</div>
+        <div class='ok'>📄 Clicked a &quot;Bloomberg 25 NG SDE面经&quot;</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 13</div>
+      <div class="body">
+        <div class="eval">👁 The click on &#x27;Bloomberg 25 NG SDE面经&#x27; is uncertain because the current visible content still shows the prior &#x27;Bloomberg 26ng vo2&#x27; modal, so I have not yet confirmed a third summary.</div>
+        <div class="mem">🧠 I have grounded summaries for at least two relevant posts: &#x27;Bloomberg 26 NG SWE 过经+Timeline&#x27; and &#x27;Bloomberg 26ng vo2&#x27;. I still need a fresh harvested shortlist with real hrefs and, if possible, confirm whether the current modal switched to the clicked 25 NG post.</div>
+        <div class="goal">🎯 Run one JavaScript snippet on the current Xiaohongshu page to harvest visible result titles+hrefs and inspect the currently active modal/post title, url, and text snippet.</div>
+        <div class="action">▶ <span class='act'>run_js</span>(code=<span class='pv'>(() =&gt; { const cards = Array.from(document.querySelectorAll(&#x27;a[href*=&quot;/search_result/&quot;], a[href*=&quot;/explore/&quot;], a[href*=&quot;…</span>)</div>
+        <div class='ok'>📄 {&quot;pageUrl&quot;: &quot;https://www.xiaohongshu.com/search_result_ai?keyword=bloomberg%2520sde%2520ng%2520%25E9%259D%25A2%25E7%25BB%258F&amp;source=web_explore_feed&quot;, &quot;titleCandidates&quot;: [&quot;开花堡bbg timeline+全流程过经，很清晰&quot;, &quot;Bbg 26NG sde面经攒人品&quot;, &quot;Bloomberg SDE 25NG挂经&quot;, &quot;bloomberg sde ng 无hc挂经&quot;, &quot;不是~也没人告诉我Bloomberg SWE面这么癫啊&quot;, &quot;开花堡ng超绝新鲜全流程过经&quot;, &quot;彭博社 26ng superday coding分享&quot;, &quot;Bloomberg tech round面经+EM round求助&quot;, &quot;Bloomberg SDE vo 两轮顺利结束&quot;, &quot;Bloomberg 26ng vo1&quot;], &quot;bodyCandidates&quot;: [&quot;沪ICP备13030189号 | 营业执照 | 2024沪公网安备31010102002533号 | 增值电信业务经营许可证：沪B2-20150021 | 医疗器械网络交易服务第三方平台备案：(沪)网械平台备字[2019]第00006号 | 互联网药品信息服务资格证书：(沪)-经营性-2023-0144 | 违法不良信息举报电话：4006676810 | 上海市互联网举报中心 | 网上有害信息举报专区 | 自营经营者信息 | 网络文化经营许可证：沪网文(2024)1344-086…</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 14</div>
+      <div class="body">
+        <div class="eval">👁 The previous click result remained uncertain; I have not yet confirmed the 25 NG post switched into view, so the goal is not fully complete.</div>
+        <div class="mem">🧠 Still on Xiaohongshu results tab BE46. I have many relevant Bloomberg 2025–2026 NG/SDE titles visible and at least one grounded opened-post summary, but I still need the real harvested hrefs from run_js before I can return the final text list.</div>
+        <div class="goal">🎯 Harvest grounded Xiaohongshu result links and inspect the active post/modal content with one run_js call.</div>
+        <div class="action">▶ <span class='act'>run_js</span>(code=<span class='pv'>(() =&gt; { const norm = s =&gt; (s || &#x27;&#x27;).replace(/\s+/g, &#x27; &#x27;).trim(); const anchors = Array.from(document.querySelectorAll(&#x27;…</span>)</div>
+        <div class='ok'>📄 {&quot;pageUrl&quot;: &quot;https://www.xiaohongshu.com/search_result_ai?keyword=bloomberg%2520sde%2520ng%2520%25E9%259D%25A2%25E7%25BB%258F&amp;source=web_explore_feed&quot;, &quot;results&quot;: [{&quot;title&quot;: &quot;开花堡bbg timeline+全流程过经，很清晰&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/695a33da000000002103eedb?xsec_token=ABX4AlD2_rFc5MYqelFxoyUN5YlaLRk-t40l4KaTAIvuo=&amp;xsec_source=pc_search&quot;}, {&quot;title&quot;: &quot;Bbg 26NG sde面经攒人品&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/6961d1ec000000001a03424f?xsec_token=AB1HCNH_UDWbqzvvxQ94oJg_pUgD2K3fIFKy-NRrZAEA0=&amp;xsec_source=pc_search&quot;}, {&quot;title&quot;: &quot;Bloomberg SDE 25NG挂经&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/671199ad000000001402ee63?xsec_token=ABgQvCiUDC-bI_AMITDWgJfQhqr…</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 15</div>
+      <div class="body">
+        <div class="eval">👁 The previous goal was not completed yet in this step; I still need to run JavaScript to inspect the active modal/post and harvest grounded data. Verdict: Incomplete.</div>
+        <div class="mem">🧠 Grounded run_js harvest already produced many Bloomberg 2025–2026 NG/SDE Xiaohongshu result titles and links. One opened post summary is verified from tab 8DE0; I am now verifying whether the current results page has an active modal/post snippet I can use as an additional grounded summary.</div>
+        <div class="goal">🎯 Run one JavaScript snippet on the current Xiaohongshu page to capture the active modal/post title, current URL, and a short text snippet, while also confirming visible result links.</div>
+        <div class="action">▶ <span class='act'>run_js</span>(code=<span class='pv'>(() =&gt; { const text = s =&gt; (s || &#x27;&#x27;).replace(/\s+/g,&#x27; &#x27;).trim(); const anchors = Array.from(document.querySelectorAll(&#x27;a…</span>)</div>
+        <div class='ok'>📄 {&quot;pageUrl&quot;: &quot;https://www.xiaohongshu.com/search_result_ai?keyword=bloomberg%2520sde%2520ng%2520%25E9%259D%25A2%25E7%25BB%258F&amp;source=web_explore_feed&quot;, &quot;topTitles&quot;: [&quot;开花堡bbg timeline+全流程过经，很清晰&quot;, &quot;Bbg 26NG sde面经攒人品&quot;, &quot;Bloomberg SDE 25NG挂经&quot;, &quot;bloomberg sde ng 无hc挂经&quot;, &quot;不是~也没人告诉我Bloomberg SWE面这么癫啊&quot;, &quot;开花堡ng超绝新鲜全流程过经&quot;, &quot;彭博社 26ng superday coding分享&quot;, &quot;Bloomberg tech round面经+EM round求助&quot;, &quot;Bloomberg SDE vo 两轮顺利结束&quot;, &quot;Bloomberg 26ng vo1&quot;], &quot;activeTextSnippet&quot;: &quot;&quot;, &quot;results&quot;: [{&quot;title&quot;: &quot;开花堡bbg timeline+全流程过经，很清晰&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/695a33da000000002103eedb?xsec_token=ABX4AlD2_rFc5MYqelFxoyUN5YlaLRk-t40l4KaTAIvuo=&amp;xsec_source=pc_search&quot;}, {&quot;title&quot;: &quot;Bbg 26NG sde面经攒人品&quot;, &quot;h…</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 16</div>
+      <div class="body">
+        <div class="eval">👁 The previous goal remained incomplete because no new inspection action has been executed yet in this step; verdict: incomplete.</div>
+        <div class="mem">🧠 Harvested run_js results already give a solid pool of real Xiaohongshu links for Bloomberg 2025–2026 NG/SDE interview posts. One post summary is verified from tab 8DE0; I am now collecting another grounded summary from a visible 25 NG result.</div>
+        <div class="goal">🎯 Open the visible &#x27;Bloomberg 25 NG SDE面经&#x27; result and inspect its on-page content for a brief summary.</div>
+        <div class="action">▶ <span class='act'>click</span>(index=<span class='pv'>10135</span>)</div>
+        <div class='ok'>📄 Clicked a &quot;Bloomberg 25 NG SDE面经&quot;</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 17</div>
+      <div class="body">
+        <div class="eval">👁 The click succeeded: the current page now visibly shows the full &#x27;Bloomberg 25 NG SDE面经&#x27; post content in a modal, so I have a grounded second summary. Verdict: Success.</div>
+        <div class="mem">🧠 Verified summary #2 from the current modal: &#x27;Bloomberg 25 NG SDE面经&#x27; with apply/phone/VO timeline and interview details. Still need a fresh grounded link harvest and re-verification of the previously opened 26 NG SWE timeline post in tab 8DE0 before composing the final top ~8 list.</div>
+        <div class="goal">🎯 Harvest real Xiaohongshu links/titles from the current results page with one run_js call, then switch to the other post tab to verify its summary.</div>
+        <div class="action">▶ <span class='act'>run_js</span>(code=<span class='pv'>(() =&gt; { const cards = Array.from(document.querySelectorAll(&#x27;a[href*=&quot;/search_result/&quot;], a[href*=&quot;/explore/&quot;], a[href*=&quot;…</span>)</div><div class="action">▶ <span class='act'>switch</span>(tab_id=<span class='pv'>8DE0</span>)</div>
+        <div class='ok'>📄 {&quot;results&quot;: [{&quot;title&quot;: &quot;开花堡bbg timeline+全流程过经，很清晰&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/695a33da000000002103eedb?xsec_token=ABX4AlD2_rFc5MYqelFxoyUN5YlaLRk-t40l4KaTAIvuo=&amp;xsec_source=pc_search&quot;}, {&quot;title&quot;: &quot;Bbg 26NG sde面经攒人品&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/6961d1ec000000001a03424f?xsec_token=AB1HCNH_UDWbqzvvxQ94oJg_pUgD2K3fIFKy-NRrZAEA0=&amp;xsec_source=pc_search&quot;}, {&quot;title&quot;: &quot;Bloomberg SDE 25NG挂经&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/671199ad000000001402ee63?xsec_token=ABgQvCiUDC-bI_AMITDWgJfQhqrbEPARtq6FzkCQEFHHk=&amp;xsec_source=pc_search&quot;}, {&quot;title&quot;: &quot;bloomberg sde ng 无hc挂经&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/67d436bf000000000b0…</div><div class='ok'>📄 Switched to tab #8DE0</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 18</div>
+      <div class="body">
+        <div class="eval">👁 Successfully switched to the verified Bloomberg post tab 8DE0; verdict: Success.</div>
+        <div class="mem">🧠 Grounded data available so far: a harvested pool of Bloomberg 2025–2026 NG/SDE Xiaohongshu result titles+real links from run_js, plus verified summaries for &#x27;Bloomberg 26 NG SWE 过经+Timeline&#x27; and &#x27;Bloomberg 25 NG SDE面经&#x27;. I still want one more opened-post summary before composing the final shortlist.</div>
+        <div class="goal">🎯 Switch back to the Xiaohongshu results tab and open one more highly relevant 2026 Bloomberg NG/SDE result to capture a short grounded summary.</div>
+        <div class="action">▶ <span class='act'>switch</span>(tab_id=<span class='pv'>BE46</span>)</div>
+        <div class='ok'>📄 Switched to tab #BE46</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 19</div>
+      <div class="body">
+        <div class="eval">👁 I successfully reached a state with a verified open Bloomberg 25 NG post and visible Xiaohongshu results, but I still lack freshly grounded hrefs in the current step. Verdict: Partial success.</div>
+        <div class="mem">🧠 Verified summaries available from this session: &#x27;Bloomberg 26 NG SWE 过经+Timeline&#x27; in tab 8DE0 and &#x27;Bloomberg 25 NG SDE面经&#x27; in the current modal. Next I am grounding the final shortlist by harvesting visible result titles and real hrefs directly from the current Xiaohongshu page.</div>
+        <div class="goal">🎯 Run one bulk JavaScript snippet on the current Xiaohongshu page to capture visible result titles, real hrefs, and the active post snippet for the final response.</div>
+        <div class="action">▶ <span class='act'>run_js</span>(code=<span class='pv'>(() =&gt; { const uniq = new Map(); const anchors = Array.from(document.querySelectorAll(&#x27;a[href*=&quot;/search_result/&quot;], a[hre…</span>)</div>
+        <div class='ok'>📄 {&quot;items&quot;: [{&quot;title&quot;: &quot;开花堡bbg timeline+全流程过经，很清晰&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/695a33da000000002103eedb?xsec_token=ABX4AlD2_rFc5MYqelFxoyUN5YlaLRk-t40l4KaTAIvuo=&amp;xsec_source=pc_search&quot;}, {&quot;title&quot;: &quot;Bbg 26NG sde面经攒人品&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/6961d1ec000000001a03424f?xsec_token=AB1HCNH_UDWbqzvvxQ94oJg_pUgD2K3fIFKy-NRrZAEA0=&amp;xsec_source=pc_search&quot;}, {&quot;title&quot;: &quot;Bloomberg SDE 25NG挂经&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/671199ad000000001402ee63?xsec_token=ABgQvCiUDC-bI_AMITDWgJfQhqrbEPARtq6FzkCQEFHHk=&amp;xsec_source=pc_search&quot;}, {&quot;title&quot;: &quot;bloomberg sde ng 无hc挂经&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/67d436bf000000000b016…</div>
+      </div>
+    </div>
+    <div class="step err">
+      <div class="sn">Step 20</div>
+      <div class="body">
+        
+        
+        
+        
+        <div class='err'>❌ 1 validation error for AgentOutput
+  Invalid JSON: trailing characters at line 1 column 1417 [type=json_invalid, input_value=&#x27;{&quot;thinking&quot;:&quot;I need to g...es_to_display&quot;:null}}]}&#x27;, input_type=str]
+    For further information visit https://errors.pydantic.dev/2.12/v/json_invalid</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 21</div>
+      <div class="body">
+        <div class="eval">👁 The previous step did not perform the planned bulk JavaScript harvest, so the goal of grounding final links remains incomplete.</div>
+        <div class="mem">🧠 Grounded summaries available: (1) current modal &#x27;Bloomberg 25 NG SDE面经&#x27; with apply/phone/VO details visible in browser_state, and (2) previously verified tab 8DE0 &#x27;Bloomberg 26 NG SWE 过经+Timeline&#x27; from agent history. I still need real harvested hrefs from the current Xiaohongshu page before composing the final answer.</div>
+        <div class="goal">🎯 Run one bulk JavaScript snippet on the current Xiaohongshu page to harvest visible result titles and real hrefs, plus the active modal title/text snippet for grounding.</div>
+        <div class="action">▶ <span class='act'>run_js</span>(code=<span class='pv'>(() =&gt; { const anchors = Array.from(document.querySelectorAll(&#x27;a[href*=&quot;/search_result/&quot;], a[href*=&quot;/explore/&quot;], a[href*…</span>)</div>
+        <div class='ok'>📄 {&quot;items&quot;: [{&quot;title&quot;: &quot;开花堡bbg timeline+全流程过经，很清晰&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/695a33da000000002103eedb?xsec_token=ABX4AlD2_rFc5MYqelFxoyUN5YlaLRk-t40l4KaTAIvuo=&amp;xsec_source=pc_search&quot;}, {&quot;title&quot;: &quot;Bbg 26NG sde面经攒人品&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/6961d1ec000000001a03424f?xsec_token=AB1HCNH_UDWbqzvvxQ94oJg_pUgD2K3fIFKy-NRrZAEA0=&amp;xsec_source=pc_search&quot;}, {&quot;title&quot;: &quot;Bloomberg SDE 25NG挂经&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/671199ad000000001402ee63?xsec_token=ABgQvCiUDC-bI_AMITDWgJfQhqrbEPARtq6FzkCQEFHHk=&amp;xsec_source=pc_search&quot;}, {&quot;title&quot;: &quot;bloomberg sde ng 无hc挂经&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/67d436bf000000000b016…</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 22</div>
+      <div class="body">
+        <div class="eval">👁 The bulk-harvest is already grounded in read_state and the active 25 NG post is visible, but I still need one more directly verified opened-post summary before finalizing. Verdict: Partial success.</div>
+        <div class="mem">🧠 Grounded data available now: read_state contains 22 harvested Xiaohongshu result titles and real hrefs; browser_state visibly confirms the full content of &#x27;Bloomberg 25 NG SDE面经&#x27;. I will verify the open 26 NG post in tab 8DE0 next, then return a concise top-8 text list.</div>
+        <div class="goal">🎯 Switch to the opened Bloomberg 26 NG SWE tab and verify its visible content for a short grounded summary.</div>
+        <div class="action">▶ <span class='act'>switch</span>(tab_id=<span class='pv'>8DE0</span>)</div>
+        <div class='ok'>📄 Switched to tab #8DE0</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 23</div>
+      <div class="body">
+        <div class="eval">👁 Successfully verified the open Bloomberg 26 NG SWE post content in tab 8DE0 from the visible browser_state. Verdict: Success.</div>
+        <div class="mem">🧠 Verified summary content for &#x27;Bloomberg 26 NG SWE 过经+Timeline&#x27; on tab 8DE0. I still need a grounded harvest of result titles and real hrefs from the Xiaohongshu results tab before I can return the final top ~8 list with links.</div>
+        <div class="goal">🎯 Switch to the Xiaohongshu results tab and bulk-harvest visible result titles and real hrefs with one run_js call for the final shortlist.</div>
+        <div class="action">▶ <span class='act'>switch</span>(tab_id=<span class='pv'>BE46</span>)</div><div class="action">▶ <span class='act'>run_js</span>(code=<span class='pv'>(() =&gt; { const anchors = Array.from(document.querySelectorAll(&#x27;a[href*=&quot;/search_result/&quot;], a[href*=&quot;/explore/&quot;], a[href*…</span>)</div>
+        <div class='ok'>📄 Switched to tab #BE46</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 24</div>
+      <div class="body">
+        <div class="eval">👁 Successfully switched back to the Xiaohongshu results tab, but the planned final bulk JavaScript harvest has not yet been executed. Verdict: Partial success.</div>
+        <div class="mem">🧠 Current page is Xiaohongshu search results with the &#x27;Bloomberg 25 NG SDE面经&#x27; modal open. Grounded summaries already available for &#x27;Bloomberg 25 NG SDE面经&#x27; and previously verified &#x27;Bloomberg 26 NG SWE 过经+Timeline&#x27;. Need one fresh run_js harvest now to finalize the top shortlist with real links.</div>
+        <div class="goal">🎯 Run one bulk JavaScript snippet on the current Xiaohongshu page to harvest visible result titles and real hrefs, plus the active modal title/text snippet for grounding.</div>
+        <div class="action">▶ <span class='act'>run_js</span>(code=<span class='pv'>(() =&gt; { const anchors = Array.from(document.querySelectorAll(&#x27;a[href*=&quot;/search_result/&quot;], a[href*=&quot;/explore/&quot;], a[href*…</span>)</div>
+        <div class='ok'>📄 {&quot;url&quot;: &quot;https://www.xiaohongshu.com/explore/67a6ab6a000000002900fc34?xsec_token=AB4taAomlV8jkicqw1x_mQL7OK0Efe1I5sUgwZ5bHqObY=&amp;xsec_source=pc_search&amp;source=web_explore_feed&quot;, &quot;items&quot;: [{&quot;title&quot;: &quot;开花堡bbg timeline+全流程过经，很清晰&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/695a33da000000002103eedb?xsec_token=ABX4AlD2_rFc5MYqelFxoyUN5YlaLRk-t40l4KaTAIvuo=&amp;xsec_source=pc_search&quot;}, {&quot;title&quot;: &quot;Bbg 26NG sde面经攒人品&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/6961d1ec000000001a03424f?xsec_token=AB1HCNH_UDWbqzvvxQ94oJg_pUgD2K3fIFKy-NRrZAEA0=&amp;xsec_source=pc_search&quot;}, {&quot;title&quot;: &quot;Bloomberg SDE 25NG挂经&quot;, &quot;href&quot;: &quot;https://www.xiaohongshu.com/search_result/671199ad000000001402ee63?xsec_token=ABgQv…</div>
+      </div>
+    </div>
+    <div class="step good">
+      <div class="sn">Step 25</div>
+      <div class="body">
+        <div class="eval">👁 The necessary grounded data is already available: harvested Xiaohongshu links are in read_state and two relevant posts were directly verified. Verdict: Success.</div>
+        <div class="mem">🧠 Collected a grounded shortlist of Bloomberg 2025–2026 NG/SDE Xiaohongshu posts using onsite search only. Verified summaries for 2 posts and harvested real Xiaohongshu links for the rest from run_js.</div>
+        <div class="goal">🎯 Return the final text list of the most relevant Xiaohongshu posts with verified links and brief summaries where available.</div>
+        <div class="action">▶ <span class='act'>done</span>(text=<span class='pv'>我已经按要求在小红书站内搜索并整理了一份 **2025–2026 Bloomberg SDE NG 面经** 清单。下面每条都带了我在页面中实际采集到的 **原帖链接**；其中前两条是我实际打开并查看了内容的，后面的则是根据搜索结果标题筛选…</span>, success=<span class='pv'>True</span>)</div>
+        <div class='ok'>📄 我已经按要求在小红书站内搜索并整理了一份 **2025–2026 Bloomberg SDE NG 面经** 清单。下面每条都带了我在页面中实际采集到的 **原帖链接**；其中前两条是我实际打开并查看了内容的，后面的则是根据搜索结果标题筛选出的高相关帖子。
+
+1. **Bloomberg 25 NG SDE面经**  
+   简要总结：作者写了 2025 申请流程时间线：**1/2 apply → 1/9 phone 邀请 → 1/21 phone interview → 1/24 VO 邀请 → 2/6 VO 三轮连续完成**。文中提到 phone 有简历 deep dive 和 why Bloomberg；VO 包含两轮 coding（作者写到 *decode string*、*word search*）和一轮 HR。  
+   链接：https://www.xiaohongshu.com/search_result/67a6ab6a000000002900fc34?xsec_token=AB4taAomlV8jkicqw1x_mQL7OK0Efe1I5sUgwZ5bHqObY=&amp;xsec_source=pc_search
+
+2. **Bloomberg 26 NG SWE 过经+Timeline**  
+   简要总结：我在另一标签页核实到，这篇是 **26 NG SWE** 的完整 timeline，总结了多轮技术面 / HR / manager / system design 的推进过程；页面中可见时间线包括 **9/23 invite、10/2 tech1、10/3…</div>
+      </div>
+    </div>
+  <div class="result">
+    <h2>📦 Final Result</h2>
+    <div>我已经按要求在小红书站内搜索并整理了一份 **2025–2026 Bloomberg SDE NG 面经** 清单。下面每条都带了我在页面中实际采集到的 **原帖链接**；其中前两条是我实际打开并查看了内容的，后面的则是根据搜索结果标题筛选出的高相关帖子。<br><br>1. **Bloomberg 25 NG SDE面经**  <br>   简要总结：作者写了 2025 申请流程时间线：**1/2 apply → 1/9 phone 邀请 → 1/21 phone interview → 1/24 VO 邀请 → 2/6 VO 三轮连续完成**。文中提到 phone 有简历 deep dive 和 why Bloomberg；VO 包含两轮 coding（作者写到 *decode string*、*word search*）和一轮 HR。  <br>   链接：https://www.xiaohongshu.com/search_result/67a6ab6a000000002900fc34?xsec_token=AB4taAomlV8jkicqw1x_mQL7OK0Efe1I5sUgwZ5bHqObY=&amp;xsec_source=pc_search<br><br>2. **Bloomberg 26 NG SWE 过经+Timeline**  <br>   简要总结：我在另一标签页核实到，这篇是 **26 NG SWE** 的完整 timeline，总结了多轮技术面 / HR / manager / system design 的推进过程；页面中可见时间线包括 **9/23 invite、10/2 tech1、10/3 tech2、10/22 tech3+HR、11/5 manager+system design、11/10 offer**，还带有准备建议。  <br>   链接：https://www.xiaohongshu.com/search_result/6919cd18000000000d03ba63?xsec_token=AB_cwVx9Ah9g0yz7-joBri8JyveFsQWrnDZBc0QhiqVfc=&amp;xsec_source=<br><br>3. **Bbg 26NG sde面经攒人品**  <br>   说明：未打开正文，按标题看是高度相关的 **Bloomberg 26NG SDE 面经**。  <br>   链接：https://www.xiaohongshu.com/search_result/6961d1ec000000001a03424f?xsec_token=AB1HCNH_UDWbqzvvxQ94oJg_pUgD2K3fIFKy-NRrZAEA0=&amp;xsec_source=pc_search<br><br>4. **Bloomberg 26ng Timeline**  <br>   说明：未打开正文，按标题看是 **26ng 时间线/流程贴**，相关性高。  <br>   链接：https://www.xiaohongshu.com/search_result/69602f3a00000000220384f8?xsec_token=ABAoGBskcdpw9GGjDyCRxtidziAz3W3Nckn8t_x19Ak3M=&amp;xsec_source=pc_search<br><br>5. **Bloomberg NG SDE面经**  <br>   说明：未打开正文，标题直接对应 **NG SDE 面经**。  <br>   链接：https://www.xiaohongshu.com/search_result/6913cabc000000000700deaf?xsec_token=AB50kkLSXWL00quuuk2S-7kFj8BcsEzl5BNeyiuf2plkI=&amp;xsec_source=pc_search<br><br>6. **开花堡 Bloomberg 26 ng SDE VO**  <br>   说明：未打开正文，按标题看聚焦 **26 NG SDE VO**，属于面经流程中的高价值环节。  <br>   链接：https://www.xiaohongshu.com/search_result/69e0aaee000000002301d016?xsec_token=ABSzEQoIF1nwAoCN1tJDXiXoJwGsyyPaRqW5xrXoaHuqk=&amp;xsec_source=pc_search<br><br>7. **26 NG Bloomberg 新鲜面经**  <br>   说明：未打开正文，标题显示是 **26 NG 新鲜面经**，和你的需求高度匹配。  <br>   链接：https://www.xiaohongshu.com/search_result/68d5b33c000000001101e55d?xsec_token=ABTYZ_pCXkhnq8IYGiEnVQX0CLUXYIwabUhtJbM1D_g0Q=&amp;xsec_source=pc_search<br><br>8. **贡献一个Bloomberg 26 SDE 面经**  <br>   说明：未打开正文，标题明确是 **Bloomberg 26 SDE 面经**。  <br>   链接：https://www.xiaohongshu.com/search_result/69cf7a66000000001d018880?xsec_token=AB0NmB_3g-KTqYi2Tob-mt3dmjuh0LHR5wodozN9bgekQ=&amp;xsec_source=pc_search<br><br>补充说明：<br>- 我全程停留在 **xiaohongshu.com** 站内，没有使用外部搜索引擎。<br>- 上述链接均来自我在小红书搜索结果页用脚本实际采集到的 `href`。<br>- 其中第 1、2 条我实际打开并看到了正文内容；第 3–8 条我没有逐个打开，因此只保留了**标题 + 原帖链接**，没有编造正文总结。<br><br>如果你愿意，我下一步还可以继续帮你把这 8 篇按：**timeline / phone / VO / HR / manager round / 高频题目** 再整理成一版更适合复习的笔记。</div>
+  </div>
+</main>
+</body></html>

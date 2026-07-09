@@ -36,11 +36,18 @@ def build_llm():
             AzureCliCredential(),
             "https://cognitiveservices.azure.com/.default",
         )
+        deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-5.4")
+        # gpt-5.x are reasoning models: on Azure they must use the Responses API
+        # for reliable *strict* structured output. Via Chat Completions they emit
+        # JSON + trailing text -> browser-use's parser fails ("trailing
+        # characters"). Requires api_version >= 2025-03-01-preview.
+        use_responses_api = deployment.lower().startswith("gpt-5")
         return ChatAzureOpenAI(
-            model=os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-5.4"),
+            model=deployment,
             azure_endpoint=endpoint,
-            api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
+            api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2025-04-01-preview"),
             azure_ad_token_provider=token_provider,
+            use_responses_api=use_responses_api,
         )
 
     if os.getenv("ANTHROPIC_API_KEY"):

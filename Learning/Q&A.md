@@ -3,3 +3,5 @@
 
 2. i decided to directly test on AWS, but i have some questions: 1. i can already connect the server on VS code via ssh, how can i deploy this project on the this server? do we need to deploy it on the docker or(sandbox)? do we have an elegant way if we want to change the version of project. 2. since this is a python project, how to manage the virtual env? using uv? 
  which means CI/CD, devops 
+
+ 3. but my develop environment is kind of different with deploy env,i dont know if the change would be effective on production env, how to cope with this?

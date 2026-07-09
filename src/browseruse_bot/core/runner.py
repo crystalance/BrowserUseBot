@@ -21,6 +21,8 @@ from browseruse_bot.core.llm import build_llm
 from browseruse_bot.core.policy import TaskPolicy
 from browseruse_bot.core.result import Result
 from browseruse_bot.core.store import RunStore
+from browseruse_bot.core.synthesizer import synthesize
+from browseruse_bot.core.tools import CollectedStore, build_tools
 
 logger = logging.getLogger("browseruse_bot")
 
@@ -39,7 +41,13 @@ def _find_playwright_chromium() -> str | None:
     if win:
         return str(win[0])
     lin_base = Path.home() / ".cache" / "ms-playwright"
-    lin = sorted(lin_base.glob("chromium-*/chrome-linux/chrome"), reverse=True)
+    lin = sorted(
+        [
+            *lin_base.glob("chromium-*/chrome-linux64/chrome"),
+            *lin_base.glob("chromium-*/chrome-linux/chrome"),
+        ],
+        reverse=True,
+    )
     return str(lin[0]) if lin else None
 
 
@@ -62,6 +70,45 @@ def _ensure_display() -> None:
     logger.warning("DISPLAY was unset; defaulting to %s for headful Chromium.", display)
 
 
+def _save_transcript(goal: str, history, result: Result) -> None:
+    """Dump the agent's full step history to workspace/logs/transcripts for replay.
+
+    Best-effort: a transcript failure must never break a task.
+    """
+    try:
+        import json
+        from datetime import datetime, timezone
+
+        log_dir = Path(os.getenv("LOG_DIR", "./workspace/logs")).expanduser() / "transcripts"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        path = log_dir / f"run-{stamp}.json"
+
+        # Prefer browser-use's own serializer; fall back to a minimal summary.
+        steps = None
+        for attr in ("model_dump", "dict"):
+            fn = getattr(history, attr, None)
+            if callable(fn):
+                try:
+                    steps = fn()
+                    break
+                except Exception:  # noqa: BLE001
+                    steps = None
+
+        payload = {
+            "goal": goal,
+            "ok": result.ok,
+            "steps": result.steps,
+            "needed_human": result.needed_human,
+            "summary": result.summary,
+            "history": steps,
+        }
+        path.write_text(json.dumps(payload, default=str, ensure_ascii=False, indent=2), encoding="utf-8")
+        logger.info("\U0001f4dd transcript saved: %s", path)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("could not save transcript: %s", e)
+
+
 class BrowserAgentRunner:
     """Wraps browser-use. ``run_task(goal, policy) -> Result``."""
 
@@ -70,7 +117,7 @@ class BrowserAgentRunner:
         *,
         llm=None,
         profile_dir: str = "./workspace/browser-use-user-data-dir-main",
-        max_steps: int = 25,
+        max_steps: int = 40,
         headless: bool = False,
         executable_path: str | None = None,
         use_vision: bool = False,
@@ -90,6 +137,14 @@ class BrowserAgentRunner:
         self.handoff: Handoff | None = None  # set per-run; platform calls signal_done()
         self._agent: Agent | None = None  # active agent, for stop()
         self.store = RunStore()
+
+    @property
+    def use_vision(self) -> bool:
+        return self._use_vision
+
+    def set_vision(self, on: bool) -> None:
+        """Toggle whether screenshots are sent to the LLM (takes effect next task)."""
+        self._use_vision = on
 
     def stop(self) -> None:
         """Stop the current job immediately (idempotent; safe if nothing runs).
@@ -114,6 +169,7 @@ class BrowserAgentRunner:
             _ensure_display()
 
         self.handoff = Handoff(policy, on_login_required=self._on_login_required)
+        collected = CollectedStore()
         session = BrowserSession(
             headless=self._headless,
             user_data_dir=self._profile_dir,
@@ -131,6 +187,7 @@ class BrowserAgentRunner:
             llm=self._llm or build_llm(),
             browser_session=session,
             use_vision=self._use_vision,
+            tools=build_tools(collected),
         )
         self._agent = agent
 
@@ -140,9 +197,22 @@ class BrowserAgentRunner:
         finally:
             self._agent = None
 
+        # Phase 2: if the collector saved posts, synthesize the final answer from
+        # their raw text (browser-less sub-agent). Else fall back to the agent's
+        # own final result.
+        posts = collected.load()
+        if posts:
+            try:
+                summary = await synthesize(goal, posts, llm=self._llm)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("synthesizer failed, using agent result: %s", e)
+                summary = history.final_result() or "(no result returned)"
+        else:
+            summary = history.final_result() or "(no result returned)"
+
         result = Result(
-            ok=bool(history.is_done() and history.is_successful() is not False),
-            summary=history.final_result() or "(no result returned)",
+            ok=bool(history.is_done() and history.is_successful() is not False) or bool(posts),
+            summary=summary,
             steps=len(history.history),
             needed_human=self.handoff.needed_human,
         )
@@ -150,4 +220,5 @@ class BrowserAgentRunner:
             goal=goal, ok=result.ok, steps=result.steps, needed_human=result.needed_human,
             latency_s=round(time.perf_counter() - t0, 1), summary=result.summary,
         )
+        _save_transcript(goal, history, result)
         return result

@@ -1,5 +1,12 @@
 1. persistent profile  -- DONE (profile dir renamed to browser-use-user-data-dir-main so browser-use stops copying it to a temp dir)
-2. import skills
+2. import skills  -- DONE (skills/*.md, auto-match on /new, /skills, /skill add, send .md file; sample xiaohongshu-search.md)
 3. gpt-5.4 emits malformed JSON ("trailing characters") -> agent fails 5x and stops. Try gpt-4o or add fallback_llm.
 4. screenshot/click timeouts on slow sites (小红书 creator pages) -- consider raising CDP timeouts.
 5. AWS: noVNC login handoff (see designDoc/deployToAWS) + bind 0.0.0.0 + PUBLIC_HOST + URL token.
+6. the login window is not optimized for the phone
+7. cant finish the original intended question
+8. should accelerate the whole process
+9. automate the deploy process
+10. should add skill to automate regular tasks  -- DONE
+11. progress heartbeat: push per-step "Next goal" to Telegram so long tasks don't look frozen (9-min silence after Resuming)
+11.

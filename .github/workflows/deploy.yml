@@ -10,7 +10,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test:
+    runs-on: ubuntu-latest   # Linux, like prod — catches OS/dep issues early
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: pip install -e .
+      - name: Import smoke test
+        run: |
+          python -c "import browseruse_bot.core.runner, browseruse_bot.core.handoff, browseruse_bot.core.llm"
+          python -c "import browseruse_bot.platform.telegram_gateway, browseruse_bot.platform.novnc_view, browseruse_bot.platform.remote_view, browseruse_bot.platform.tunnel"
+      # As the suite grows, add:  - run: pip install pytest && pytest -q
+
   deploy:
+    needs: test              # deploy only if the test job passes
     runs-on: ubuntu-latest
     steps:
       - name: SSH deploy
