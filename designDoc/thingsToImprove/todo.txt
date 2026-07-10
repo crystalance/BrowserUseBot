@@ -9,4 +9,76 @@
 9. automate the deploy process
 10. should add skill to automate regular tasks  -- DONE
 11. progress heartbeat: push per-step "Next goal" to Telegram so long tasks don't look frozen (9-min silence after Resuming)
-11.
+
+====================================================================
+ENGINEERING IMPROVEMENTS (resume-oriented, for US 27 NG SWE / AI Eng)
+Prioritized. Each notes WHAT IT DEMONSTRATES to a reviewer.
+====================================================================
+
+--- A. OBSERVABILITY (highest signal for "production" thinking) ---
+A1. LLM tracing: integrate Langfuse or LangSmith — capture every LLM call
+    (prompt, tokens, latency, cost, model) per run/step. One dashboard to see
+    where time & $ go.  [Demonstrates: LLM observability, cost awareness]
+A2. Structured logs: emit JSON logs (run_id, step, action, latency_ms, tokens)
+    instead of plain text; ship to a store you can query.  [Demonstrates: log design]
+A3. Metrics + dashboard: Prometheus counters/histograms (steps/run, latency,
+    success_rate, tokens, 429s) + a Grafana panel.  [Demonstrates: SRE/metrics]
+A4. Distributed tracing: OpenTelemetry spans (task -> step -> action -> LLM/CDP)
+    so you can see the critical path of a 45-min run.  [Demonstrates: tracing]
+A5. Cost accounting: $/run + $/successful-result; per-model breakdown; budget cap.
+
+--- B. LATENCY / PERFORMANCE (the current ~45min pain) ---
+B1. Faster model: gpt-4.1 (raise Azure TPM quota) — removes 75s timeouts,
+    ~halves per-step time.  [Demonstrates: model/infra tradeoffs]
+B2. Prompt/DOM size reduction: prune the DOM/accessibility tree sent per step
+    (fewer tokens = faster + cheaper). Measure tokens/step before/after.
+B3. Parallelize collection: extract N post overlays concurrently (asyncio /
+    multiple CDP targets) instead of serial click->extract.  [Demonstrates: async perf]
+B4. Streaming progress: stream step goals to Telegram (heartbeat #11) so
+    perceived latency drops; optionally stream the final synthesis.
+B5. Caching: cache search-result harvests / dedupe already-seen posts.
+
+--- C. RELIABILITY / RESILIENCE ---
+C1. fallback_llm: primary gpt-5.4/4.1 with automatic fallback on parse-fail/429.
+C2. Retry+backoff for 429/timeouts (exponential, jittered) at the LLM layer.
+C3. Circuit breaker: after K consecutive LLM failures, pause & alert instead of
+    burning the step budget.  [Demonstrates: resilience patterns]
+C4. Task persistence/resume: checkpoint collected records so a crash mid-run can
+    resume (already writing workspace/collected/*.jsonl — build on it).
+
+--- D. EVALUATION / QUALITY (AI-engineer signal) ---
+D1. Eval harness: golden tasks + automated scoring (task success, groundedness,
+    hallucinated-link rate). Run in CI.  [Demonstrates: LLM eval discipline]
+D2. LLM-as-judge for groundedness: verify every returned link/summary is backed
+    by a collected record (no fabrication).  [Demonstrates: hallucination guardrails]
+D3. Regression suite: replay recorded transcripts; assert no perf/quality drop.
+D4. Real unit/integration tests (pytest) for tools, skills matching, synthesizer.
+
+--- E. SECURITY (important + often overlooked) ---
+E1. Sandbox run_js: it executes arbitrary agent-authored JS — constrain/audit it.
+E2. Secrets management: move keys out of .env into a manager (AWS Secrets Mgr /
+    SOPS). NOTE: rotate the OpenAI key that was pasted in plaintext.
+E3. Remote-view auth: token/expiry on the noVNC/screencast link (port 8770).
+E4. Per-user authz + rate limiting on the Telegram bot.
+
+--- F. SCALABILITY / ARCHITECTURE ---
+F1. Job queue (Redis + worker) so multiple tasks/users run concurrently; the bot
+    just enqueues.  [Demonstrates: distributed systems]
+F2. Containerize (Docker) for reproducible dev/prod parity (defer per deploy doc).
+F3. Multi-tenant: per-user profiles/sessions, isolation.
+F4. Horizontal scale: stateless workers + shared job/result store.
+
+--- G. PRODUCT / DX ---
+G1. Web dashboard for run history, transcripts, metrics (reuse render_trajectory).
+G2. Skill marketplace: more skills; self-improving skills from successful runs.
+G3. Structured result output (JSON + Markdown), export.
+
+RESUME FRAMING (pick 2-3 to go deep, quantify impact):
+- "Built a human-in-the-loop web agent (Telegram + browser-use) with a CodeAct
+  run_js tool and a two-phase collector/synthesizer, cutting a task from 40 steps
+  /1 result to 14 grounded results."
+- "Added LLM observability (Langfuse) + evals (groundedness, success-rate);
+  reduced p50 latency Xx via model routing + DOM pruning + async extraction."
+- "Shipped CI/CD (GitHub Actions -> AWS) with health-check auto-rollback."
+Best depth-picks for interviews: A (observability) + B (latency) + D (evals).
+ 
