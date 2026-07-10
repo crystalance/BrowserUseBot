@@ -18,6 +18,7 @@ from browser_use import Agent, BrowserSession
 
 from browseruse_bot.core.handoff import Handoff
 from browseruse_bot.core.llm import build_llm
+from browseruse_bot.core.observability import end_run_trace, start_run_trace, wrap_llm
 from browseruse_bot.core.policy import TaskPolicy
 from browseruse_bot.core.result import Result
 from browseruse_bot.core.store import RunStore
@@ -182,9 +183,11 @@ class BrowserAgentRunner:
             # it by default; we must.
             args=(["--no-sandbox"] if sys.platform.startswith("linux") else None),
         )
+        trace = start_run_trace(goal, metadata={"max_steps": self._max_steps})
+        base_llm = self._llm or build_llm()
         agent = Agent(
             task=goal,
-            llm=self._llm or build_llm(),
+            llm=wrap_llm(base_llm, trace, label="agent_step"),
             browser_session=session,
             use_vision=self._use_vision,
             tools=build_tools(collected),
@@ -203,7 +206,8 @@ class BrowserAgentRunner:
         posts = collected.load()
         if posts:
             try:
-                summary = await synthesize(goal, posts, llm=self._llm)
+                syn_llm = wrap_llm(self._llm or build_llm(), trace, label="synthesizer")
+                summary = await synthesize(goal, posts, llm=syn_llm)
             except Exception as e:  # noqa: BLE001
                 logger.warning("synthesizer failed, using agent result: %s", e)
                 summary = history.final_result() or "(no result returned)"
@@ -216,6 +220,7 @@ class BrowserAgentRunner:
             steps=len(history.history),
             needed_human=self.handoff.needed_human,
         )
+        end_run_trace(trace, summary, result.ok)
         self.store.record(
             goal=goal, ok=result.ok, steps=result.steps, needed_human=result.needed_human,
             latency_s=round(time.perf_counter() - t0, 1), summary=result.summary,

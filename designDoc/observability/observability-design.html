@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BrowserUseBot — Observability Design</title>
+<style>
+  :root{--bg:#0f1117;--card:#171a23;--mut:#8b93a7;--acc:#5b9dff;--ok:#2ecc71;--warn:#ffb020;--err:#ff6b6b;--line:#232838;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:#e6e9ef;font:14.5px/1.6 -apple-system,Segoe UI,Roboto,sans-serif}
+  header{padding:26px 30px;border-bottom:1px solid var(--line)}
+  h1{margin:0 0 4px;font-size:22px}
+  h2{font-size:18px;margin:30px 0 10px;border-left:3px solid var(--acc);padding-left:10px}
+  h3{font-size:15px;margin:18px 0 6px;color:#cdd3e0}
+  main{max-width:960px;margin:0 auto;padding:10px 20px 70px}
+  .mut{color:var(--mut)}
+  code,pre{font-family:ui-monospace,Consolas,monospace}
+  code{background:#0d1a2e;border:1px solid #1e3a5f;border-radius:4px;padding:1px 5px;font-size:12.5px}
+  pre{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12.5px}
+  table{border-collapse:collapse;width:100%;margin:10px 0;font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#141824;color:#cdd3e0}
+  .rec{color:var(--ok);font-weight:600}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:12px 0}
+  .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600}
+  .p-ok{background:rgba(46,204,113,.15);color:var(--ok)} .p-warn{background:rgba(255,176,32,.15);color:var(--warn)}
+  .diagram{white-space:pre;background:#0c0f16;border:1px solid var(--line);border-radius:10px;padding:16px;overflow:auto;color:#b8c1d6;font-size:12.5px}
+  ul{margin:6px 0 6px 0;padding-left:22px} li{margin:3px 0}
+  .k{color:var(--acc)}
+</style></head>
+<body>
+<header>
+  <h1>BrowserUseBot — Observability Design</h1>
+  <div class="mut">Goal: see where every run spends <b>time</b>, <b>tokens</b>, and <b>$</b>; catch failures (429 / JSON / timeouts); self-hosted on AWS EC2, viewed from a laptop browser.</div>
+</header>
+<main>
+
+<h2>1. What we need to observe</h2>
+<table>
+<tr><th>Layer</th><th>Signals</th><th>Why</th></tr>
+<tr><td><b>LLM call</b></td><td>model, prompt/completion tokens, latency, cost, finish_reason, errors (429, trailing-JSON, 75s timeout)</td><td>The dominant cost & latency driver — this is where the ~45min went</td></tr>
+<tr><td><b>Agent step</b></td><td>step #, action(s) taken (run_js/click/save_items…), duration, retries</td><td>Find wasted steps / loops / tab churn</td></tr>
+<tr><td><b>Task run</b></td><td>goal, ok, #steps, needed_human, #collected records, end-to-end latency</td><td>Product-level success & throughput</td></tr>
+<tr><td><b>Browser/CDP</b></td><td>navigation, screenshot-capture timeouts, run_js exec time</td><td>Site-side slowness</td></tr>
+</table>
+<p class="mut">We already emit much of this to logs + <code>workspace/logs/transcripts/*.json</code> + the SQLite run store. Observability = <b>structure it, trace it, and put it behind a UI</b>.</p>
+
+<h2>1b. Chosen approach — local-dev, Docker Compose, portable</h2>
+<div class="card">
+<b>Decision:</b> run the observability stack <b>locally for development</b> (not on the cloud yet). Priorities: <b>easy to deploy</b> and <b>portable across dev machines</b> (Windows now → MacBook later). Resources are not a concern on a dev laptop.
+<ul>
+<li><b>Mechanism = Docker Compose.</b> Commit a <code>docker-compose.yml</code>; on any machine with Docker Desktop it's just <code>docker compose up -d</code>. Identical on Windows and macOS → trivially portable when you switch environments.</li>
+<li><b>Tool = Langfuse</b> (self-hosted via its official compose) — LLM-native traces + <b>cost / latency / token</b> dashboards, which is exactly what we need to attack the ~45-min problem. (Since resources aren't a concern locally, its multi-container stack is fine.)</li>
+<li><b>Bot points at it via env</b> (<code>LANGFUSE_HOST=http://localhost:3000</code> + keys). The <b>same instrumentation code</b> later works against a cloud/self-hosted host by only changing the env — cloud deploy stays an option, not a requirement.</li>
+<li><b>Switching machines</b> = install Docker Desktop, <code>git clone</code>, <code>docker compose up -d</code>, restore <code>.env</code>. That's it.</li>
+</ul>
+</div>
+
+<h2>2. Architecture</h2>
+<div class="diagram">
+  ┌────────────────────────── EC2 (Ubuntu, Docker) ──────────────────────────┐
+  │                                                                          │
+  │   BrowserUseBot ──(SDK: traces/generations)──▶  Langfuse Server :3000    │
+  │   (systemd svc)                                   │   ▲                  │
+  │        │ OTLP (optional)                          │   │ Postgres/ClickH. │
+  │        ▼                                          ▼   │                  │
+  │   OTel Collector ──▶ Prometheus :9090 ──▶ Grafana :3001 (system metrics) │
+  │                                                                          │
+  └──────────────────────────────────────────────────────────────────────────┘
+            ▲  http (SSH tunnel / SG port / reverse-proxy+TLS)
+            │
+      Laptop browser  →  Langfuse UI (LLM traces, cost)  +  Grafana (dashboards)
+</div>
+
+<h2>3. Stack options</h2>
+<table>
+<tr><th>Option</th><th>Best for</th><th>Weight on EC2</th><th>Verdict</th></tr>
+<tr><td><b>Langfuse</b> (self-hosted)</td><td>LLM-native traces, token/cost, per-run drilldown, evals</td><td>Medium–heavy (Postgres + ClickHouse + Redis + MinIO via docker-compose)</td><td class="rec">Recommended core</td></tr>
+<tr><td><b>Arize Phoenix</b></td><td>LLM traces + built-in evals, OpenTelemetry-native</td><td>Light (single container)</td><td>Great lighter alt / if EC2 RAM is tight</td></tr>
+<tr><td><b>Prometheus + Grafana</b></td><td>System metrics, dashboards, alerts (success rate, p95 latency, 429s)</td><td>Light–medium</td><td>Add for SRE-style dashboards</td></tr>
+<tr><td>OTel + Jaeger/Tempo</td><td>Distributed tracing spans</td><td>Medium</td><td>Optional (Langfuse covers most)</td></tr>
+</table>
+
+<div class="card">
+<b>Recommended stack (resume-strong, pragmatic):</b>
+<ul>
+<li><span class="pill p-ok">Core</span> <b>Langfuse (self-hosted)</b> — every LLM call as a <i>generation</i> (tokens, latency, cost, model), grouped into a <i>trace</i> per task run, with step spans. This is the LLM-observability centerpiece.</li>
+<li><span class="pill p-warn">Optional</span> <b>Prometheus + Grafana</b> — counters/histograms for success_rate, steps/run, p50/p95 latency, tokens, 429s → one dashboard.</li>
+<li><b>If EC2 RAM is tight</b> (≤4GB): use <b>Arize Phoenix</b> (single container) instead of Langfuse.</li>
+</ul>
+</div>
+
+<h2>4. Instrumentation plan (where in the code)</h2>
+<ul>
+<li><b>LLM layer</b> — wrap the chat model built in <code>core/llm.py</code>: on each <code>ainvoke</code>, record a Langfuse <i>generation</i> (model, input/output tokens from <code>usage</code>, latency, error type). browser-use exposes token usage on its completion object, so we capture it there.</li>
+<li><b>Run layer</b> — in <code>core/runner.py</code>, open a Langfuse <i>trace</i> per <code>run_task</code> (goal, run_id) and child spans for Phase-1 (collector) and Phase-2 (synthesizer).</li>
+<li><b>Step layer</b> — via the existing <code>on_step_start</code> hook + transcript, emit a span per agent step (actions, duration).</li>
+<li><b>Metrics</b> — a tiny Prometheus exporter reads the SQLite run store + counters (increment on 429/timeout/json-error) and exposes <code>/metrics</code>.</li>
+<li><b>Env-gated</b> — all tracing behind <code>OBSERVABILITY=langfuse</code> + keys, so local dev stays simple and prod turns it on.</li>
+</ul>
+
+<h2>5. Deploy on EC2 &amp; view from your laptop <span class="mut">(your question)</span></h2>
+<p><b>Yes — fully doable.</b> The stack runs as Docker containers on the EC2; you reach the web UIs from your laptop by one of three methods (most→least secure):</p>
+
+<h3>A. SSH tunnel <span class="pill p-ok">recommended — nothing exposed</span></h3>
+<pre>ssh -L 3000:localhost:3000 -L 3001:localhost:3001 ubuntu@&lt;EC2-IP&gt;
+# then on your laptop:  http://localhost:3000  (Langfuse)   http://localhost:3001 (Grafana)</pre>
+<p class="mut">No security-group ports opened; the UIs bind to localhost on the box and travel through your existing SSH. Best default.</p>
+
+<h3>B. Security-group port (quick, like the noVNC link)</h3>
+<ul>
+<li>Open inbound <code>3000</code> (and <code>3001</code>) to <b>your IP only</b> in the security group.</li>
+<li>Browse <code>http://&lt;EC2-IP&gt;:3000</code>. Simple, but the UI is internet-facing — keep it IP-restricted and set a strong Langfuse admin password.</li>
+</ul>
+
+<h3>C. Reverse proxy + TLS + auth <span class="pill p-warn">production</span></h3>
+<ul>
+<li>nginx/Caddy in front → HTTPS (Let's Encrypt) + basic-auth, one domain. Do this if it ever becomes multi-user or always-on.</li>
+</ul>
+
+<h3>Resource note — your box is <code>c7i-flex.large</code> (2 vCPU / 4 GB)</h3>
+<p class="mut">4 GB is already tight when Chromium runs (OOM risk). <b>Do NOT co-host a heavy Langfuse v3 stack (Postgres+ClickHouse+Redis+MinIO, ~3–4 GB) on the bot box</b> — it would starve/kill the browser mid-run. Choose one of these instead:</p>
+<table>
+<tr><th>Path</th><th>Where observability runs</th><th>Cost / risk</th><th>Resume signal</th></tr>
+<tr><td class="rec">1. Separate observability node (recommended)</td><td>A 2nd small EC2 (e.g. t4g.small ~2 GB) runs Langfuse; the bot sends traces over the network</td><td>~a few $/mo (stop when idle); bot box stays safe</td><td>Strong — "separated the app plane from the observability plane"</td></tr>
+<tr><td>2. Langfuse Cloud (free tier)</td><td>Managed; bot only runs the SDK</td><td>$0, zero infra</td><td>Good — but less "I deployed infra"</td></tr>
+<tr><td>3. Phoenix on the same box</td><td>Single ~500 MB container beside the bot</td><td>Cheapest but adds memory pressure; watch for OOM</td><td>OK for a light demo</td></tr>
+</table>
+<p class="mut"><b>Key insight:</b> the <b>instrumentation code in the bot is identical</b> for all three — only the endpoint/keys differ. So: build the SDK instrumentation once (env-gated, host configurable), validate instantly against <b>Langfuse Cloud free tier</b>, then later self-host Langfuse on a <b>separate small EC2</b> by just changing <code>LANGFUSE_HOST</code>. Best of both: fast start now, infra story later.</p>
+<p class="mut"><b>Access from laptop</b> stays the same — SSH-tunnel into whichever node runs the UI (§5A).</p>
+
+<h3>Original resource guidance</h3>
+<p class="mut">Langfuse v3 full stack (Postgres+ClickHouse+Redis+MinIO) wants ~3–4GB free RAM. On a 4GB box it's tight alongside Chromium — either (a) run observability on a separate small instance, (b) use <b>Phoenix</b> (single container, ~500MB), or (c) point the bot at <b>Langfuse Cloud</b> (managed) and skip self-hosting. For a resume, <b>self-hosting on EC2 shows more</b>.</p>
+
+<h2>6. Rollout steps</h2>
+<ol>
+<li>Pick core: Langfuse (self-host) or Phoenix (lighter).</li>
+<li><code>docker compose up</code> the observability stack on EC2; verify UI via SSH tunnel.</li>
+<li>Add the LLM-layer instrumentation (traces/generations) behind <code>OBSERVABILITY</code> env.</li>
+<li>Add run/step spans in the runner.</li>
+<li>(Optional) Prometheus exporter + Grafana dashboard for success_rate / latency / 429s.</li>
+<li>Run a task → confirm the trace shows per-step tokens/latency/cost and pinpoints the 75s timeouts.</li>
+</ol>
+
+<h2>7. What this demonstrates (resume)</h2>
+<p class="mut">LLM observability &amp; cost awareness, self-hosted infra on AWS, tracing/metrics design, and data-driven latency work — the exact SWE ∩ AI-Engineer signal.</p>
+
+</main></body></html>

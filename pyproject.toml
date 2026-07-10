@@ -12,6 +12,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["ruff", "pytest", "pytest-asyncio"]
+observability = ["langfuse<3"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
