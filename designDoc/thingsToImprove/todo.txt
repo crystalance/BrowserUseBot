@@ -15,7 +15,7 @@ ENGINEERING IMPROVEMENTS (resume-oriented, for US 27 NG SWE / AI Eng)
 Prioritized. Each notes WHAT IT DEMONSTRATES to a reviewer.
 ====================================================================
 
---- A. OBSERVABILITY (highest signal for "production" thinking) ---
+--- A. OBSERVABILITY (highest signal for "production" thinking) --- [important]
 A1. LLM tracing: integrate Langfuse or LangSmith — capture every LLM call
     (prompt, tokens, latency, cost, model) per run/step. One dashboard to see
     where time & $ go.  [Demonstrates: LLM observability, cost awareness]
@@ -27,7 +27,7 @@ A4. Distributed tracing: OpenTelemetry spans (task -> step -> action -> LLM/CDP)
     so you can see the critical path of a 45-min run.  [Demonstrates: tracing]
 A5. Cost accounting: $/run + $/successful-result; per-model breakdown; budget cap.
 
---- B. LATENCY / PERFORMANCE (the current ~45min pain) ---
+--- B. LATENCY / PERFORMANCE (the current ~45min pain) ---    [important]
 B1. Faster model: gpt-4.1 (raise Azure TPM quota) — removes 75s timeouts,
     ~halves per-step time.  [Demonstrates: model/infra tradeoffs]
 B2. Prompt/DOM size reduction: prune the DOM/accessibility tree sent per step
@@ -81,4 +81,11 @@ RESUME FRAMING (pick 2-3 to go deep, quantify impact):
   reduced p50 latency Xx via model routing + DOM pruning + async extraction."
 - "Shipped CI/CD (GitHub Actions -> AWS) with health-check auto-rollback."
 Best depth-picks for interviews: A (observability) + B (latency) + D (evals).
- 
+
+
+ ----function:test linked-in -----
+
+
+
+--- message queue---
+
