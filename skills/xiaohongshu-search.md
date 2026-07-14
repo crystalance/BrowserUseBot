@@ -24,16 +24,17 @@ Login-Hosts: xiaohongshu.com
   SAME TAB without navigating away. Xiaohongshu opens a clicked note as an in-page
   detail OVERLAY/modal, so:
     1. Click the result card (it opens the note detail overlay on the same page).
-    2. Use ONE `run_js` call to read the overlay's MAIN TEXT (正文) + title + url, e.g.:
+    2. Use ONE `extract_and_save` call whose JS RETURNS the record {title, url, body}
+       — it is saved directly, so you never re-type the body. Example:
        (() => { const m = document.querySelector('#noteContainer, .note-detail-mask, [class*="note-detail"]') || document.body;
          return { url: location.href, title: (m.querySelector('#detail-title, .title, h1')?.innerText||document.title||"").trim(),
            body: (m.querySelector('#detail-desc, .note-content, .desc, article')?.innerText || m.innerText || "").trim().slice(0, 6000) }; })
     3. Close the overlay (press Escape, or click its close button) to return to the
        results list — do NOT open a new tab or navigate to the href.
     4. Click the next card and repeat.
-- STEP 3 — save what you gathered with `save_items`, passing a JSON array of
-  {title, url, body} objects. Batch several per call. Save the FULL body text,
-  never a summary.
+- Never pass placeholder strings like `__FROM_RUN_JS__` to save_items — always
+  save the ACTUAL extracted values. Prefer `extract_and_save` so the JS return
+  value is stored directly.
 - Aim for ~15 posts with real body text (more is fine if steps allow). Don't stop
   at a tiny number if results are available.
 - If a keyword yields too few results, try simpler/broader variants (company name

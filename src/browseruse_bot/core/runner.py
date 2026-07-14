@@ -71,6 +71,31 @@ def _ensure_display() -> None:
     logger.warning("DISPLAY was unset; defaulting to %s for headful Chromium.", display)
 
 
+def _disable_screenshots(session: BrowserSession) -> None:
+    """Force ``include_screenshot=False`` on every browser-state request.
+
+    browser-use's step loop hardcodes ``include_screenshot=True`` even when
+    ``use_vision`` is off (it keeps the image only for its cloud sync / run GIFs).
+    With vision off the screenshot never reaches the LLM, so capturing it each step
+    is wasted work — and a slow page can stall on the 15s ScreenshotWatchdog
+    timeout. We wrap the session method to always skip capture.
+    """
+    orig = session.get_browser_state_summary
+
+    async def _no_screenshot(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        # include_screenshot is the first positional/keyword param; force it off.
+        if args:
+            args = args[1:]
+        kwargs.pop("include_screenshot", None)
+        return await orig(*args, include_screenshot=False, **kwargs)
+
+    # BrowserSession is a pydantic model with validate_assignment, so normal
+    # attribute assignment is rejected; bypass it with object.__setattr__. The
+    # instance attribute shadows the class method (functions are non-data
+    # descriptors, so the instance dict wins on lookup).
+    object.__setattr__(session, "get_browser_state_summary", _no_screenshot)
+
+
 def _save_transcript(goal: str, history, result: Result) -> None:
     """Dump the agent's full step history to workspace/logs/transcripts for replay.
 
@@ -183,6 +208,13 @@ class BrowserAgentRunner:
             # it by default; we must.
             args=(["--no-sandbox"] if sys.platform.startswith("linux") else None),
         )
+        # With vision off the LLM never sees the screenshot, yet browser-use
+        # hardcodes include_screenshot=True every step (only for its cloud sync /
+        # run GIFs). That capture is pure overhead here, and a slow page can stall
+        # it up to the 15s ScreenshotWatchdog timeout. Coordinate conversion uses
+        # page_info (not the screenshot), so skipping capture is safe.
+        if not self._use_vision:
+            _disable_screenshots(session)
         trace = start_run_trace(goal, metadata={"max_steps": self._max_steps})
         base_llm = self._llm or build_llm()
         agent = Agent(
