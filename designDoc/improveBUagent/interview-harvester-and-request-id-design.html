@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Long-Horizon Interview-Experience Harvester + Request-ID Tracing — Design</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d2129; --ink:#e8eaed; --muted:#9aa3b2;
+    --line:#2a2f3a; --accent:#5b9cff; --good:#3ec28f; --warn:#f0b542; --bad:#f06d6d;
+    --chip:#222836; --purple:#b98cff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  header{padding:40px 32px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#141821,#0f1115)}
+  h1{margin:0 0 6px;font-size:26px}
+  .sub{color:var(--muted);font-size:14px}
+  main{max-width:1180px;margin:0 auto;padding:28px 24px 80px}
+  h2{margin:44px 0 12px;font-size:21px;border-left:4px solid var(--accent);padding-left:12px}
+  h3{margin:26px 0 8px;font-size:17px;color:#cdd6e6}
+  p{color:#d5dae3}
+  table{width:100%;border-collapse:collapse;margin:14px 0 8px;font-size:13.5px;background:var(--panel);border-radius:10px;overflow:hidden}
+  th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:var(--panel2);color:#cfe0ff;font-weight:600}
+  tr:last-child td{border-bottom:none}
+  .good{color:var(--good);font-weight:600}
+  .warn{color:var(--warn);font-weight:600}
+  .bad{color:var(--bad);font-weight:600}
+  .chip{display:inline-block;background:var(--chip);border:1px solid var(--line);border-radius:999px;padding:2px 10px;font-size:12px;margin:2px;color:#b9c4d6}
+  .pick{background:linear-gradient(90deg,#16241c,#171a21);border:1px solid #2f6b4d;border-radius:10px;padding:14px 16px;margin:14px 0}
+  .pick b{color:var(--good)}
+  .note{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:14px 0;color:var(--muted)}
+  .warnbox{background:#221c12;border:1px solid #6b532f;border-radius:10px;padding:14px 16px;margin:14px 0;color:#f0d9a8}
+  code{background:#11151c;border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:13px;color:#9fd0ff}
+  pre{background:#0c0f14;border:1px solid var(--line);border-radius:10px;padding:16px;overflow:auto;font-size:12.5px;color:#cdd6e6}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:820px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .tag{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+  ul{margin:8px 0 8px 18px}
+  ol{margin:8px 0 8px 20px}
+  .flow{background:#0c0f14;border:1px solid var(--line);border-radius:10px;padding:18px;margin:14px 0;font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#bcd}
+  .kk{color:var(--purple);font-weight:600}
+  .new{color:var(--good)}
+  .mod{color:var(--warn)}
+  a{color:var(--accent)}
+  .lgnd span{margin-right:16px;font-size:12.5px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Long-Horizon Interview-Experience Harvester &amp; Request-ID Tracing</h1>
+  <div class="sub">Browser-Agent Platform · improveBUagent · 2026-07-14 · Design (not yet implemented)</div>
+  <div class="lgnd" style="margin-top:10px">
+    <span class="new">■ new module</span>
+    <span class="mod">■ modify existing</span>
+    <span class="chip">code refs are real symbols in <code>src/browseruse_bot</code></span>
+  </div>
+</header>
+<main>
+
+<h2>0. Two things we are designing</h2>
+<table>
+  <tr><th>#</th><th>Feature</th><th>One-line goal</th></tr>
+  <tr>
+    <td><b>1</b></td>
+    <td>Long-horizon 面经 harvester</td>
+    <td>One task = one company. The agent behaves like a human: searches, opens post after post, <b>remembers what it already visited</b>, and organizes dozens–hundreds of interview posts into a Markdown file saved on the server — running as long as needed, but <b>efficiently</b>.</td>
+  </tr>
+  <tr>
+    <td><b>2</b></td>
+    <td>Request-ID &amp; trace correlation</td>
+    <td>On <code>/new</code>, immediately return a short <b>request id</b>. That id ties every LLM call of the task together in Langfuse so you can jump from a Telegram message straight to the trace.</td>
+  </tr>
+</table>
+<p>They connect: the request id becomes the Langfuse <b>session id</b> that groups all the (chunked) traces a long harvest produces — search one id, see the whole job. We design <b>#2 first</b> because #1 depends on it.</p>
+
+<!-- ============================================================= -->
+<h2>1. Feature 2 first — Request ID &amp; Langfuse correlation</h2>
+
+<h3>1.1 Problem</h3>
+<p>Today <code>start_run_trace(goal)</code> in <code>core/observability.py</code> creates a Langfuse trace with a server-generated id we never surface. When a task misbehaves you cannot find its trace without guessing by timestamp. We need a stable id, generated <b>before</b> the run, shown to the user, and attached to every trace/generation.</p>
+
+<h3>1.2 Design</h3>
+<table>
+  <tr><th>Piece</th><th>Decision</th></tr>
+  <tr><td>ID format</td><td><code>req-YYYYMMDD-xxxxxx</code> (date + 6 base32 chars from <code>secrets.token_hex</code>). Human-readable, sortable, collision-safe for our volume. Generated in a new <span class="new"><code>core/ids.py :: new_request_id()</code></span>.</td></tr>
+  <tr><td>Where generated</td><td>In the Telegram gateway <code>cmd_new</code>, the instant a task is accepted — so it can be echoed to the user <b>before</b> the browser even starts.</td></tr>
+  <tr><td>Langfuse binding</td><td>Pass <code>request_id</code> into <code>start_run_trace</code>. Set it as the trace <b>id</b> (Langfuse v2 <code>client.trace(id=..., session_id=..., tags=[...])</code> accepts a client-supplied id) AND as <code>session_id</code> AND as a <code>tag</code>. Triple-binding = findable by URL, by session grouping, or by tag search.</td></tr>
+  <tr><td>Deep link</td><td>If <code>LANGFUSE_PROJECT_ID</code> is set, build <code>{LANGFUSE_HOST}/project/{pid}/traces/{request_id}</code> and send it in the reply. Otherwise tell the user to search the id (still one click in Langfuse).</td></tr>
+  <tr><td>Local correlation</td><td>Add a <code>request_id</code> column to <code>RunStore</code> (<code>core/store.py</code>) and use it as the transcript filename (<code>run-{request_id}.json</code>) so Telegram → Langfuse → SQLite → transcript all share one key.</td></tr>
+</table>
+
+<h3>1.3 Telegram UX</h3>
+<div class="flow">
+you  ▸ /new google 面经<br>
+bot  ▸ 🆔 <span class="kk">req-20260714-9fa3c1</span>&nbsp;&nbsp;·&nbsp;&nbsp;🧩 skill: Company Interview Harvest<br>
+     ▸ 🔎 trace: https://jp.cloud.langfuse.com/project/…/traces/req-20260714-9fa3c1<br>
+     ▸ ▶️ harvesting <b>Google</b> NG interviews … (I'll report progress)<br>
+     ▸ 📈 12 saved · 0 dup · queue 40 …<br>
+     ▸ ✅ req-20260714-9fa3c1 — 87 posts → google/面经.md
+</div>
+
+<h3>1.4 Code touch-points</h3>
+<pre><span class="new">core/ids.py</span>            new_request_id() -> "req-20260714-9fa3c1"
+<span class="mod">core/observability.py</span>  start_run_trace(goal, metadata, *, request_id=None, session_id=None)
+                       └─ client.trace(id=request_id, session_id=session_id or request_id,
+                                        tags=[request_id], name="task_run", input=goal, ...)
+<span class="mod">core/runner.py</span>         run_task(goal, policy, *, request_id=None) — threads id into trace + store + transcript
+<span class="mod">core/store.py</span>          runs(+request_id TEXT) ; record(..., request_id=...)
+<span class="mod">platform/telegram_gateway.py</span>  cmd_new(): rid = new_request_id(); reply id+link BEFORE run; pass rid to run_task
+<span class="mod">platform/config.py</span>      + LANGFUSE_PROJECT_ID (optional, for deep links)</pre>
+<div class="note">Backward-compatible: <code>request_id</code> is optional everywhere. If observability is off, the id still shows in Telegram + SQLite + transcript name; only the Langfuse link is omitted.</div>
+
+<!-- ============================================================= -->
+<h2>2. Feature 1 — the long-horizon harvester</h2>
+
+<h3>2.1 What makes this hard</h3>
+<table>
+  <tr><th>Challenge</th><th>Why the current one-shot loop fails</th></tr>
+  <tr><td><b>Volume</b> (dozens–hundreds of posts)</td><td>A single <code>Agent.run()</code> accumulates every step's DOM + reasoning in the message history. At ~12–16k input tokens/step (measured), 100+ steps means an ever-growing, slowing, eventually context-overflowing run.</td></tr>
+  <tr><td><b>No memory of visited posts</b></td><td>The agent re-opens the same cards after scrolling; wasted steps, duplicate records. Nothing survives a crash or a second run.</td></tr>
+  <tr><td><b>Not resumable</b></td><td>If step 90 fails, all progress is trapped in volatile history. We want "continue Google from where we stopped."</td></tr>
+  <tr><td><b>Final answer too big</b></td><td>The Phase-2 <code>synthesize()</code> currently sends every record in one prompt — fine for 15, not for 200.</td></tr>
+</table>
+
+<h3>2.2 Core idea — decouple the crawl from the LLM context</h3>
+<p>Two mechanisms do the heavy lifting; both push state <b>out of</b> the volatile agent history into durable stores:</p>
+<div class="grid">
+  <div class="card">
+    <div class="tag">Mechanism A</div>
+    <h3 style="margin-top:4px">Persistent Visited-Ledger</h3>
+    <p>A per-company SQLite ledger of every post id we've seen and its outcome. Dedup is enforced <b>inside the tool</b>, not in the prompt — the agent never needs to be told "here are the 140 ids you already did."</p>
+  </div>
+  <div class="card">
+    <div class="tag">Mechanism B</div>
+    <h3 style="margin-top:4px">Chunked fresh-agent runs</h3>
+    <p>An outer orchestrator runs the agent in bounded <b>chunks</b> (e.g. ~15 new posts / ~25 steps each). After a chunk, we discard the history and start a <b>fresh</b> agent with a tiny brief. Constant context, resumable, unbounded total reach.</p>
+  </div>
+</div>
+
+<h3>2.3 The Visited-Ledger <span class="new">(core/ledger.py — new)</span></h3>
+<p>Canonical key = the note id parsed from the URL (<code>/explore/&lt;id&gt;</code> or <code>/search_result/&lt;id&gt;</code>).</p>
+<pre>CREATE TABLE visited (
+    company   TEXT NOT NULL,     -- "google"
+    note_id   TEXT NOT NULL,     -- canonical id from URL
+    url       TEXT,
+    title     TEXT,
+    status    TEXT NOT NULL,     -- saved | empty | failed | skipped
+    ts        REAL NOT NULL,
+    PRIMARY KEY (company, note_id)
+);</pre>
+<p>A second table in the same SQLite file is the <b>durable candidate queue</b> — the discovery output, so a fresh chunk can resume by opening URLs directly instead of re-scrolling:</p>
+<pre>CREATE TABLE candidates (
+    company   TEXT NOT NULL,
+    note_id   TEXT NOT NULL,     -- canonical id
+    href      TEXT NOT NULL,     -- full url WITH xsec_token (openable directly)
+    title     TEXT,
+    added_ts  REAL NOT NULL,
+    PRIMARY KEY (company, note_id)
+);
+-- "remaining work" = candidates LEFT JOIN visited WHERE visited.note_id IS NULL</pre>
+<ul>
+  <li><b>Dedup:</b> <code>extract_and_save</code> becomes ledger-aware — it computes the note id from the record's <code>url</code>, and if the ledger already has it <code>saved</code>, it returns <span class="good">"duplicate, skipped"</span> and does <b>not</b> re-save. The agent can happily re-encounter cards; convergence is automatic.</li>
+  <li><b>Resume:</b> a new task for the same company loads the ledger; already-<code>saved</code> ids are skipped, so the crawl naturally continues with fresh posts.</li>
+  <li><b>Health:</b> <code>empty</code>/<code>failed</code> statuses let us retry-or-skip flaky posts and report a real success rate.</li>
+</ul>
+<div class="pick"><b>Key design win:</b> dedup lives in the tool + ledger, so the LLM prompt stays small no matter how many posts we've done. This is what makes hundreds-of-posts feasible.</div>
+
+<h3>2.4 Chunked orchestration <span class="new">(core/harvest.py — new)</span></h3>
+<div class="flow">
+HarvestOrchestrator.run(company, request_id):<br>
+&nbsp;&nbsp;ledger = VisitedLedger(company);&nbsp; store = CollectedStore(company)<br>
+&nbsp;&nbsp;chunk = 0<br>
+&nbsp;&nbsp;<span class="kk">while</span> ledger.saved_count() &lt; company.target <span class="kk">and</span> chunk &lt; MAX_CHUNKS:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;chunk += 1<br>
+&nbsp;&nbsp;&nbsp;&nbsp;brief = build_chunk_brief(company, saved=ledger.saved_count(), target=company.target)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="new"># FRESH agent, bounded steps, SAME browser session (keeps login+scroll pos)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;before = ledger.saved_count()<br>
+&nbsp;&nbsp;&nbsp;&nbsp;await run_chunk(brief, session_id=request_id, chunk_no=chunk,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; max_steps=CHUNK_STEPS, tools=ledger_aware_tools(ledger, store))<br>
+&nbsp;&nbsp;&nbsp;&nbsp;heartbeat(request_id, ledger)&nbsp;&nbsp;# 📈 Telegram progress<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="kk">if</span> ledger.saved_count() == before: <span class="kk">break</span>&nbsp;&nbsp;# no-progress guard → stop, don't loop forever<br>
+&nbsp;&nbsp;md = organize_to_markdown(company, store)&nbsp;&nbsp;# chunked synthesizer<br>
+&nbsp;&nbsp;MdWriter.save(company, md)&nbsp;&nbsp;# workspace/harvest/&lt;company&gt;/面经.md
+</div>
+<table>
+  <tr><th>Decision</th><th>Rationale</th></tr>
+  <tr><td>Fresh agent per chunk, <b>shared</b> <code>BrowserSession</code></td><td>Resets the LLM message history (bounded context / cost) while keeping the logged-in browser, cookies, and scroll position — so the crawl continues seamlessly.</td></tr>
+  <tr><td>Chunk brief carries <b>counts, not lists</b></td><td>"You've saved 45/100. Keep opening unseen posts; duplicates auto-skip." No giant id list in the prompt.</td></tr>
+  <tr><td>No-progress guard</td><td>If a chunk saves 0 new posts (exhausted results / blocked), stop cleanly instead of burning chunks.</td></tr>
+  <tr><td><code>MAX_CHUNKS</code> ceiling</td><td>Safety cap on total work even though "time doesn't matter."</td></tr>
+</table>
+
+<h3>2.5 Resume — how does a fresh chunk know where to start?</h3>
+<p>A fresh agent has <b>zero memory</b> of prior chunks. It resumes only because progress lives in durable stores <i>outside</i> the discarded message history. Three layers, weakest to strongest:</p>
+<table>
+  <tr><th>Layer</th><th>What it gives the fresh chunk</th><th>Reliability</th></tr>
+  <tr><td>Shared <code>BrowserSession</code></td><td>Same logged-in browser, same results page &amp; scroll position</td><td class="warn">Fragile — 小红书's infinite feed virtualizes / re-ranks on interaction, so scroll position is not a dependable cursor</td></tr>
+  <tr><td><b>Durable candidate queue</b> <span class="new">(new)</span></td><td>The remaining unvisited <code>href</code>s (with <code>xsec_token</code>); the chunk opens each <b>by URL</b></td><td class="good">Deterministic — independent of scroll / feed order</td></tr>
+  <tr><td>Visited ledger + tool dedup</td><td>Re-opening a seen card is a no-op (<code>extract_and_save</code> auto-skips)</td><td class="good">Makes imperfect positioning harmless — never duplicates</td></tr>
+</table>
+<div class="pick"><b>Resume rule:</b> a chunk first <b>drains the candidate queue by opening URLs directly</b> (deterministic), and only <b>scrolls to discover more</b> candidates when the queue is empty. So "where to start" = <i>the next unvisited row in <code>candidates</code></i>, not "wherever the browser happened to be scrolled."</div>
+<p>The chunk brief therefore reads roughly: <i>"Company Google. Saved 45/80. Here are the next N unvisited post URLs — open each, <code>extract_and_save</code>, close. Duplicates auto-skip. When this batch is done and you need more, scroll the search results and harvest new cards."</i> — counts and a short URL batch, never the full history.</p>
+
+<h3>2.6 Per-chunk agent behavior (human-like, efficient)</h3>
+<ol>
+  <li><b>Drain the queue first:</b> take the next batch of unvisited <code>candidates</code> and open each <b>by URL</b> (deterministic resume) — click/navigate to open the detail, then <b>one</b> <code>extract_and_save</code> whose JS returns <code>{note_id, url, title, body, meta}</code>. Ledger auto-dedups. Close (Esc). Repeat.</li>
+  <li><b>Discover more only when the queue drains:</b> one <code>run_js</code> harvests the visible result cards → <code>[{note_id, title, href}]</code>; scroll 1–2× and re-harvest. New rows are appended to <code>candidates</code> for this and future chunks. (Bulk, one LLM call.)</li>
+  <li><b>Stop</b> when the chunk hits <code>CHUNK_STEPS</code> or its new-post target; the orchestrator takes over.</li>
+</ol>
+<div class="note">Everything repetitive is already <b>CodeAct</b> (<code>run_js</code> / <code>extract_and_save</code> in <code>core/tools.py</code>), so the LLM spends tokens on <i>navigation decisions</i>, not on transcribing text. Screenshots are already disabled when vision is off (<code>_disable_screenshots</code>), removing per-step capture overhead.</div>
+
+<h3>2.7 Incremental Markdown output <span class="new">(core/mdwriter.py — new)</span></h3>
+<p>Storage layout on the server:</p>
+<pre>workspace/harvest/
+  google/
+    面经.md              &lt;- organized, human-readable final doc
+    raw.jsonl            &lt;- every saved record (CollectedStore, append-only)
+    ledger.sqlite        &lt;- visited ids + candidate queue (dedup/resume)
+    meta.json            &lt;- {request_id, last_run, saved, target}
+  amazon/
+    …</pre>
+<ul>
+  <li><b>Crash-safe:</b> <code>raw.jsonl</code> is appended per post, so a failure keeps all prior progress; the <code>面经.md</code> is (re)generated from it at each checkpoint.</li>
+  <li><b>Chunked synthesis:</b> <code>organize_to_markdown</code> maps records → grouped sections (by role / round / year), summarizing in batches of ~20 then merging — an extension of the existing <code>synthesize()</code> so it scales past a single prompt.</li>
+  <li><b>Retrieval later:</b> a flat, predictable path per company. (Fetching these off the server — <code>/get &lt;company&gt;</code> over Telegram, or a small static endpoint — is a follow-up, out of scope here.)</li>
+</ul>
+
+<h3>2.8 New skill <span class="new">(skills/company-interview-harvest.md)</span></h3>
+<p>Follows the existing <code>SkillStore</code> format. Triggers on 面经/interview + a company name; sets <code>Allowed-Hosts</code>/<code>Login-Hosts</code>. Instructs the collect-then-organize loop above and tells the agent duplicates auto-skip so it should keep exploring rather than stopping early.</p>
+<div class="warnbox"><b>Skill-routing fix (from the bugs log, item 3):</b> matching must require an <i>intent</i> word (面经/interview/面试), not just a site name like 小红书, so ordinary "get my latest post" tasks don't get the harvester prepended. Tighten <code>Skill.score()</code> to weight intent triggers.</div>
+
+<h3>2.9 Target companies <span class="new">(config/companies.json — iterable)</span></h3>
+<p>Seed list; each entry carries display name, aliases (EN + 中文), search queries, and a target count. Iterate freely.</p>
+<pre>[
+  {"key":"google",   "name":"Google",   "aliases":["谷歌","google","goog"],
+   "queries":["google 面经","google 面试","谷歌 面经","google ng 面经","google oa"], "target":80},
+  {"key":"amazon",   "name":"Amazon",   "aliases":["亚马逊","amazon","amzn"],
+   "queries":["amazon 面经","亚马逊 面经","amazon ng 面经","amazon oa","amazon vo"], "target":80},
+  {"key":"meta",     "name":"Meta",     "aliases":["facebook","meta","脸书"], "queries":["meta 面经","facebook 面经","meta ng 面经"], "target":60},
+  {"key":"microsoft","name":"Microsoft","aliases":["微软","microsoft","msft"], "queries":["microsoft 面经","微软 面经","microsoft ng 面经"], "target":60},
+  {"key":"apple",    "name":"Apple",    "aliases":["苹果","apple"], "queries":["apple 面经","苹果 面经","apple ng 面经"], "target":50},
+  {"key":"nvidia",   "name":"Nvidia",   "aliases":["英伟达","nvidia"], "queries":["nvidia 面经","英伟达 面经","nvidia ng 面经"], "target":50},
+  {"key":"tiktok",   "name":"TikTok",   "aliases":["字节","bytedance","tiktok","抖音"], "queries":["tiktok 面经","字节 面经","bytedance 面经"], "target":60}
+]</pre>
+<p class="sub">Also reasonable to add: Netflix, Uber, Airbnb, LinkedIn, Salesforce, Oracle, Bloomberg, Databricks, Snowflake, Stripe, DoorDash, Roblox, Coinbase, and quant shops (Citadel, HRT, Jane Street, Two Sigma).</p>
+
+<h3>2.10 Is this 小红书-only? — site-agnostic engine + thin source adapters</h3>
+<p><b>No — only a thin adapter is site-specific.</b> Everything that makes the long-horizon crawl work operates on abstract <code>{note_id, url, title, body}</code> records and is reusable across sources. The per-site part is small and isolated.</p>
+<table>
+  <tr><th>Component</th><th>Site-agnostic?</th><th>Site-specific part (if any)</th></tr>
+  <tr><td>Request id / Langfuse tracing</td><td class="good">Yes</td><td>—</td></tr>
+  <tr><td>Visited ledger + dedup</td><td class="good">Yes</td><td>parsing a canonical <code>note_id</code> from a URL</td></tr>
+  <tr><td>Candidate queue</td><td class="good">Yes</td><td>the <code>href</code>/token URL shape</td></tr>
+  <tr><td>Chunked orchestrator</td><td class="good">Yes</td><td>—</td></tr>
+  <tr><td>MdWriter + chunked synthesizer</td><td class="good">Yes</td><td>—</td></tr>
+  <tr><td>Harvest recipe (search flow, discover JS, extract JS, selectors)</td><td class="bad">No</td><td class="warn">all of it — this <b>is</b> the adapter</td></tr>
+</table>
+<p>Formalize the per-site part as a <span class="new">SourceAdapter (core/sources/base.py — new)</span> so the generic orchestrator can drive any site:</p>
+<pre>class SourceAdapter(Protocol):
+    key: str                       # "xiaohongshu"
+    allowed_hosts: list[str]
+    login_hosts: list[str]
+    def search_entry(self, query: str) -> str        # URL / how to run the search
+    def parse_note_id(self, url: str) -> str | None   # canonical id
+    discover_js: str               # run_js: harvest visible cards -> [{note_id,title,href}]
+    extract_js: str                # extract_and_save: one post -> {note_id,url,title,body,meta}
+    def post_date(self, record: dict) -> float | None # for incremental (2.11); optional</pre>
+<ul>
+  <li>First adapter = <b>xiaohongshu</b> (lifts today's <code>skills/xiaohongshu-search.md</code> JS into code).</li>
+  <li>Later adapters (一亩三分地 / Blind / LeetCode discuss) are ~50 lines each; the ledger, queue, chunking, md, and tracing are untouched.</li>
+  <li><code>companies.json</code> can name which source(s) a company should be harvested from.</li>
+</ul>
+<div class="pick"><b>Answer:</b> the solution is a <b>generic harvesting engine + a 小红书 adapter</b>. It is not locked to rednote; multi-site is a matter of adding adapters, not re-architecting.</div>
+
+<h3>2.11 Daily incremental crawl — pre-design so it's cheap to build later</h3>
+<p>Goal you flagged for later: <i>"search for new posts daily."</i> Because dedup + ledger already exist, daily deltas need almost no new machinery — we just pre-wire two hooks now:</p>
+<table>
+  <tr><th>Hook (add now)</th><th>Why it makes daily trivial later</th></tr>
+  <tr><td><code>meta.json</code>: <code>last_run</code> + high-water mark (newest <code>note_id</code>/date seen)</td><td>Lets a run know "anything past this is already mine."</td></tr>
+  <tr><td><code>run(company, *, mode="full"|"incremental", since=None)</code> on the orchestrator + <code>run_task</code></td><td>Daily = flip <code>mode="incremental"</code>; no signature change later.</td></tr>
+  <tr><td>Adapter <code>post_date()</code> + a "sort by newest" search entry</td><td>Discovery can <b>early-exit</b> once it reaches posts older than <code>last_run</code> — a cheap delta, not a full re-crawl.</td></tr>
+</table>
+<ul>
+  <li><b>Incremental loop:</b> search sorted by 最新 → queue only <code>note_id</code>s not in <code>visited</code> → stop when <code>post_date &lt; last_run</code> (or after K consecutive already-visited cards, which the ledger gives for free when dates are missing).</li>
+  <li><b>Output:</b> new records append to <code>raw.jsonl</code>; <code>面经.md</code> is regenerated (or a "newly added" section appended) and <code>meta.json</code> advanced.</li>
+  <li><b>Scheduler:</b> a small APScheduler/cron fires <code>HarvestOrchestrator(company, mode="incremental")</code> per company daily. That's the only genuinely new piece — everything it calls already exists.</li>
+</ul>
+<div class="note">Pre-design cost today = accept a <code>mode</code>/<code>since</code> arg and write <code>meta.json</code>. We don't build the scheduler now, but nothing will need reshaping when we do.</div>
+
+<!-- ============================================================= -->
+<h2>3. How the two features fit together</h2>
+<div class="flow">
+/new google 面经<br>
+&nbsp;&nbsp;│&nbsp; rid = <span class="kk">req-20260714-9fa3c1</span>&nbsp;&nbsp;(Feature 2)<br>
+&nbsp;&nbsp;▼<br>
+HarvestOrchestrator.run(google, rid)&nbsp;&nbsp;(Feature 1)<br>
+&nbsp;&nbsp;├─ chunk 1 → Langfuse trace (session_id = rid)&nbsp;&nbsp;→ 15 saved<br>
+&nbsp;&nbsp;├─ chunk 2 → Langfuse trace (session_id = rid)&nbsp;&nbsp;→ +14 saved (3 dup skipped)<br>
+&nbsp;&nbsp;├─ …<br>
+&nbsp;&nbsp;└─ organize → google/面经.md<br>
+<span class="kk">Search rid in Langfuse</span> → the whole multi-chunk job, grouped as one session.
+</div>
+<p>Each chunk is its own trace (bounded, easy to read), but they share <code>session_id = request_id</code>, so Langfuse's session view reconstructs the entire long-horizon task under the one id you were handed on Telegram.</p>
+
+<h2>4. Efficiency levers (summary)</h2>
+<table>
+  <tr><th>Lever</th><th>Effect</th><th>Status</th></tr>
+  <tr><td>Dedup in tool + ledger</td><td>Zero wasted re-visits; small prompt regardless of scale</td><td class="good">design</td></tr>
+  <tr><td>Durable candidate queue (open-by-URL)</td><td>Deterministic resume across chunks; no scroll guessing</td><td class="good">design</td></tr>
+  <tr><td>Chunked fresh-agent runs</td><td>Constant context/cost per chunk; resumable; unbounded reach</td><td class="good">design</td></tr>
+  <tr><td>CodeAct bulk harvest + extract_and_save</td><td>Few LLM calls per post; no re-typing</td><td class="good">done</td></tr>
+  <tr><td>Screenshots off when vision off</td><td>Removes per-step capture + 15s stall risk</td><td class="good">done</td></tr>
+  <tr><td>Incremental JSONL + checkpoint md</td><td>Crash-safe progress</td><td class="good">design</td></tr>
+  <tr><td>Chunked synthesizer</td><td>Final doc scales past one prompt</td><td class="good">design</td></tr>
+  <tr><td>Faster agent model (gpt-4.1)</td><td>~3–5× lower per-step latency (separate task)</td><td class="warn">pending</td></tr>
+</table>
+
+<h2>5. Proposed rollout</h2>
+<table>
+  <tr><th>Step</th><th>Deliverable</th></tr>
+  <tr><td>H0</td><td><span class="new">core/ids.py</span> + request-id wiring through <code>observability</code>, <code>runner</code>, <code>store</code>, <code>telegram_gateway</code>; Telegram echoes id + Langfuse link. <b>(Feature 2, standalone.)</b></td></tr>
+  <tr><td>H1</td><td><span class="new">core/ledger.py</span> + make <code>extract_and_save</code> ledger-aware (dedup). Per-company <code>CollectedStore</code> path.</td></tr>
+  <tr><td>H2</td><td><span class="new">core/harvest.py</span> orchestrator (chunked fresh-agent loop, no-progress guard, heartbeat) + shared <code>BrowserSession</code> reuse.</td></tr>
+  <tr><td>H3</td><td><span class="new">core/mdwriter.py</span> + chunked <code>organize_to_markdown</code>; storage layout under <code>workspace/harvest/</code>.</td></tr>
+  <tr><td>H4</td><td><span class="new">skills/company-interview-harvest.md</span> + <span class="new">config/companies.json</span>; tighten skill routing.</td></tr>
+  <tr><td>H5</td><td>Retrieval of the .md files off the server (Telegram <code>/get</code> or static endpoint). <i>Deferred.</i></td></tr>
+</table>
+
+<h2>6. Open questions</h2>
+<ul>
+  <li><b>Source site(s):</b> start with 小红书 only, or also 一亩三分地 / LeetCode discuss / Blind? Each is a ~50-line <code>SourceAdapter</code> (§2.10); the ledger/orchestrator are source-agnostic.</li>
+  <li><b>xsec_token expiry:</b> the candidate queue stores <code>href</code>s with a <code>xsec_token</code> that <span class="warn">can expire</span>, so open-by-URL may fail on an old queue. Options: (a) store <code>note_id</code> only and re-resolve the token at open time by re-harvesting the card; (b) on an open failure, fall back to click-from-list (resume Layer 1) — dedup keeps it correct either way; (c) treat a stale queue as "needs a fresh discovery pass." Decide the token TTL policy.</li>
+  <li><b>Daily incremental (§2.11):</b> confirm the delta stop-rule — by <code>post_date &lt; last_run</code>, or by K consecutive already-visited cards when dates are unavailable? And append-vs-regenerate for <code>面经.md</code>.</li>
+  <li><b>Target count vs. "all":</b> per-company <code>target</code> cap, or crawl until no new results? No-progress guard supports "until exhausted."</li>
+  <li><b>Freshness:</b> re-run cadence — see the daily incremental pre-design in §2.11 (<code>mode="incremental"</code>, <code>meta.json.last_run</code>).</li>
+  <li><b>One company per task</b> confirmed; do we want a <code>/new all</code> that queues the whole company list sequentially?</li>
+  <li><b>Login handoff</b> mid-harvest: if a chunk hits a login wall, the existing noVNC handoff pauses that chunk — fine, but the heartbeat should surface it.</li>
+</ul>
+
+<div class="note">This document is a plan only — no code has been changed. Recommended first build: <b>Step H0 (request id)</b>, since it is self-contained and immediately useful for debugging every other step.</div>
+
+</main>
+</body>
+</html>
