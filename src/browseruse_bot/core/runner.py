@@ -17,7 +17,10 @@ from pathlib import Path
 from browser_use import Agent, BrowserSession
 
 from browseruse_bot.core.handoff import Handoff
+from browseruse_bot.core.harvest import Company, HarvestSpec, build_chunk_brief
+from browseruse_bot.core.ledger import VisitedLedger, harvest_base
 from browseruse_bot.core.llm import build_llm
+from browseruse_bot.core.mdwriter import save_company_md
 from browseruse_bot.core.observability import end_run_trace, start_run_trace, wrap_llm
 from browseruse_bot.core.policy import TaskPolicy
 from browseruse_bot.core.result import Result
@@ -96,7 +99,7 @@ def _disable_screenshots(session: BrowserSession) -> None:
     object.__setattr__(session, "get_browser_state_summary", _no_screenshot)
 
 
-def _save_transcript(goal: str, history, result: Result) -> None:
+def _save_transcript(goal: str, history, result: Result, *, request_id: str | None = None) -> None:
     """Dump the agent's full step history to workspace/logs/transcripts for replay.
 
     Best-effort: a transcript failure must never break a task.
@@ -108,7 +111,8 @@ def _save_transcript(goal: str, history, result: Result) -> None:
         log_dir = Path(os.getenv("LOG_DIR", "./workspace/logs")).expanduser() / "transcripts"
         log_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        path = log_dir / f"run-{stamp}.json"
+        name = request_id or f"run-{stamp}"
+        path = log_dir / f"{name}.json"
 
         # Prefer browser-use's own serializer; fall back to a minimal summary.
         steps = None
@@ -123,6 +127,7 @@ def _save_transcript(goal: str, history, result: Result) -> None:
 
         payload = {
             "goal": goal,
+            "request_id": request_id,
             "ok": result.ok,
             "steps": result.steps,
             "needed_human": result.needed_human,
@@ -162,6 +167,7 @@ class BrowserAgentRunner:
         self._on_login_required = on_login_required
         self.handoff: Handoff | None = None  # set per-run; platform calls signal_done()
         self._agent: Agent | None = None  # active agent, for stop()
+        self._stop_requested = False  # set by stop(); breaks the harvest chunk loop
         self.store = RunStore()
 
     @property
@@ -178,6 +184,7 @@ class BrowserAgentRunner:
         Releases a login-wall wait so a paused agent can unwind, then asks the
         agent to stop. No-op when no task is active.
         """
+        self._stop_requested = True
         if self.handoff:
             self.handoff.signal_stop()
         agent = self._agent
@@ -187,8 +194,10 @@ class BrowserAgentRunner:
             except Exception:  # noqa: BLE001
                 pass
 
-    async def run_task(self, goal: str, policy: TaskPolicy | None = None) -> Result:
+    async def run_task(self, goal: str, policy: TaskPolicy | None = None,
+                       *, request_id: str | None = None) -> Result:
         policy = policy or TaskPolicy()
+        self._stop_requested = False
         Path(self._profile_dir).mkdir(parents=True, exist_ok=True)
 
         if not self._headless:
@@ -215,7 +224,7 @@ class BrowserAgentRunner:
         # page_info (not the screenshot), so skipping capture is safe.
         if not self._use_vision:
             _disable_screenshots(session)
-        trace = start_run_trace(goal, metadata={"max_steps": self._max_steps})
+        trace = start_run_trace(goal, metadata={"max_steps": self._max_steps}, request_id=request_id)
         base_llm = self._llm or build_llm()
         agent = Agent(
             task=goal,
@@ -256,6 +265,135 @@ class BrowserAgentRunner:
         self.store.record(
             goal=goal, ok=result.ok, steps=result.steps, needed_human=result.needed_human,
             latency_s=round(time.perf_counter() - t0, 1), summary=result.summary,
+            request_id=request_id,
         )
-        _save_transcript(goal, history, result)
+        _save_transcript(goal, history, result, request_id=request_id)
+        return result
+
+    async def run_harvest(
+        self,
+        spec: "HarvestSpec",
+        *,
+        request_id: str | None = None,
+        on_progress: Callable[[int, int, int], Awaitable[None]] | None = None,
+        chunk_steps: int = 25,
+        batch: int = 12,
+        max_chunks: int = 20,
+        stall_limit: int = 2,
+    ) -> Result:
+        """Long-horizon harvest of one company/scope's 面经 into a Markdown file.
+
+        Runs the agent in bounded *chunks* — a fresh Agent (bounded context) each
+        chunk over a SHARED, keep-alive browser session — driven by a persistent
+        ledger (dedup + candidate queue). Each chunk is its own Langfuse trace under
+        the shared session ``request_id``. Stops on target, no-progress, or the
+        chunk ceiling. The `scope` (e.g. "26 ng sde") isolates on-disk output.
+        """
+        company = spec.company
+        scope_slug = spec.scope_slug
+        self._stop_requested = False
+        policy = TaskPolicy()
+        policy.allowed_hosts = ["xiaohongshu.com"]
+        policy.login_hosts = ["xiaohongshu.com"]
+        Path(self._profile_dir).mkdir(parents=True, exist_ok=True)
+        if not self._headless:
+            _ensure_display()
+
+        self.handoff = Handoff(policy, on_login_required=self._on_login_required)
+        ledger = VisitedLedger(company.key, scope=scope_slug)
+        store = CollectedStore(path=harvest_base() / company.key / scope_slug / "raw.jsonl")
+        session = BrowserSession(
+            headless=self._headless,
+            user_data_dir=self._profile_dir,
+            executable_path=self._executable_path,
+            keep_alive=True,  # survive across chunks (multiple Agent.run() calls)
+            args=(["--no-sandbox"] if sys.platform.startswith("linux") else None),
+        )
+        if not self._use_vision:
+            _disable_screenshots(session)
+        base_llm = self._llm or build_llm()
+
+        t0 = time.perf_counter()
+        chunk = 0
+        stalls = 0
+        try:
+            while ledger.saved_count() < company.target and chunk < max_chunks:
+                if self._stop_requested:
+                    logger.info("harvest: stop requested, ending after %d chunk(s)", chunk)
+                    break
+                chunk += 1
+                before = ledger.saved_count()
+                batch_items = ledger.next_candidates(batch)
+                brief = build_chunk_brief(
+                    spec, saved=before, pending=ledger.pending_count(), batch=batch_items,
+                )
+                ctrace = start_run_trace(
+                    f"harvest {company.name} [{scope_slug}] chunk {chunk}",
+                    metadata={"company": company.key, "scope": scope_slug, "chunk": chunk},
+                    request_id=(f"{request_id}-c{chunk}" if request_id else None),
+                    session_id=request_id,
+                )
+                agent = Agent(
+                    task=brief,
+                    llm=wrap_llm(base_llm, ctrace, label="agent_step"),
+                    browser_session=session,
+                    use_vision=self._use_vision,
+                    tools=build_tools(store, ledger),
+                )
+                self._agent = agent
+                try:
+                    await agent.run(max_steps=chunk_steps, on_step_start=self.handoff.on_step_start)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("harvest chunk %d errored: %s", chunk, e)
+                finally:
+                    self._agent = None
+
+                after = ledger.saved_count()
+                end_run_trace(ctrace, f"saved={after} pending={ledger.pending_count()}", True)
+                logger.info("harvest chunk %d: saved %d→%d, pending %d",
+                            chunk, before, after, ledger.pending_count())
+                if on_progress:
+                    try:
+                        await on_progress(chunk, after, ledger.pending_count())
+                    except Exception:  # noqa: BLE001
+                        pass
+
+                if after == before:
+                    stalls += 1
+                    if ledger.pending_count() == 0 or stalls >= stall_limit:
+                        logger.info("harvest: stopping (stalls=%d, pending=%d)",
+                                    stalls, ledger.pending_count())
+                        break
+                else:
+                    stalls = 0
+        finally:
+            try:
+                await session.kill()
+            except Exception:  # noqa: BLE001
+                pass
+
+        records = store.load()
+        scope_label = spec.scope_raw or "all"
+        summary = (f"{company.name} · {scope_label}: {len(records)} 面经 posts collected "
+                   f"over {chunk} chunk(s).")
+        try:
+            md_path = await save_company_md(
+                company, records, scope_slug=scope_slug, scope_label=spec.scope_raw,
+                llm=(self._llm or build_llm()),
+            )
+            summary += f"\n📄 {md_path}"
+        except Exception as e:  # noqa: BLE001
+            logger.warning("harvest md organize failed: %s", e)
+
+        result = Result(
+            ok=bool(records),
+            summary=summary,
+            steps=chunk,
+            needed_human=self.handoff.needed_human,
+        )
+        self.store.record(
+            goal=f"harvest {company.name} [{scope_label}]", ok=result.ok, steps=chunk,
+            needed_human=result.needed_human, latency_s=round(time.perf_counter() - t0, 1),
+            summary=summary, request_id=request_id,
+        )
         return result

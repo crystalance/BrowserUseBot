@@ -50,16 +50,44 @@ def _get_client():
     return _client
 
 
-def start_run_trace(goal: str, metadata: dict | None = None):
-    """Open a trace for a task run. Returns a trace handle or None."""
+def start_run_trace(goal: str, metadata: dict | None = None, *, request_id: str | None = None,
+                    session_id: str | None = None):
+    """Open a trace for a task run. Returns a trace handle or None.
+
+    ``request_id`` (when given) becomes the trace id, so the trace is reachable at
+    a deterministic URL and searchable by tag. ``session_id`` groups multiple
+    traces of one long (chunked) task; it defaults to ``request_id``.
+    """
     client = _get_client()
     if client is None:
         return None
     try:
-        return client.trace(name="task_run", input=goal, metadata=metadata or {})
+        kwargs: dict = {"name": "task_run", "input": goal, "metadata": metadata or {}}
+        if request_id:
+            kwargs["id"] = request_id
+            kwargs["tags"] = [request_id]
+        if session_id or request_id:
+            kwargs["session_id"] = session_id or request_id
+        return client.trace(**kwargs)
     except Exception as e:  # noqa: BLE001
         logger.warning("observability: start trace failed: %s", e)
         return None
+
+
+def trace_url(request_id: str | None) -> str | None:
+    """Build a Langfuse deep link to a trace, or None if not resolvable.
+
+    Needs OBSERVABILITY=langfuse, a request_id (used as the trace id), and
+    LANGFUSE_PROJECT_ID for the project-scoped URL. Falls back to None so callers
+    can instruct the user to search the id instead.
+    """
+    if not request_id or not enabled():
+        return None
+    host = os.getenv("LANGFUSE_HOST", "").rstrip("/")
+    project = os.getenv("LANGFUSE_PROJECT_ID", "").strip()
+    if not host or not project:
+        return None
+    return f"{host}/project/{project}/traces/{request_id}"
 
 
 def end_run_trace(trace, output: str, ok: bool) -> None:

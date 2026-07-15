@@ -2,7 +2,8 @@
 
 Search Xiaohongshu (小红书) in-site for posts and return them with links.
 
-Triggers: 小红书, xiaohongshu, xhs, 面经, 笔记
+Triggers: 小红书, xiaohongshu, xhs, 笔记
+Intent-Triggers: 面经, 面试, 搜索, search, 查找, 整理, interview
 Allowed-Hosts: xiaohongshu.com
 Login-Hosts: xiaohongshu.com
 

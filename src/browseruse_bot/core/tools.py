@@ -20,6 +20,8 @@ from browser_use.agent.views import ActionResult
 from browser_use.browser import BrowserSession
 from pydantic import BaseModel, Field
 
+from browseruse_bot.core.ledger import VisitedLedger, parse_note_id
+
 logger = logging.getLogger("browseruse_bot")
 
 _MAX_RESULT_CHARS = 8000
@@ -84,9 +86,13 @@ class CollectedStore:
     rows…). The Phase-2 synthesizer organises them per the user's request.
     """
 
-    def __init__(self) -> None:
-        COLLECTED_DIR.mkdir(parents=True, exist_ok=True)
-        self.path = COLLECTED_DIR / f"run-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.jsonl"
+    def __init__(self, path: "str | Path | None" = None) -> None:
+        if path is not None:
+            self.path = Path(path)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            COLLECTED_DIR.mkdir(parents=True, exist_ok=True)
+            self.path = COLLECTED_DIR / f"run-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.jsonl"
 
     def append_items(self, items: list[dict]) -> int:
         with self.path.open("a", encoding="utf-8") as f:
@@ -140,6 +146,31 @@ class SaveItemsAction(BaseModel):
     )
 
 
+class SaveCandidatesAction(BaseModel):
+    items_json: str = Field(
+        description=(
+            'A JSON array of discovered post links, e.g. [{"title":"…","href":"https://…?xsec_token=…"}]. '
+            "Pass the FULL href including any token. Used to build a durable queue of posts to "
+            "open later; duplicates are ignored automatically."
+        )
+    )
+
+
+_SAVE_CANDIDATES_DESCRIPTION = (
+    "Queue discovered post links for later extraction. After harvesting result cards with "
+    "run_js, pass the array of {title, href} here. The harness dedups and remembers them "
+    "across chunks, so you don't re-open the same posts. Returns how many NEW links were queued."
+)
+
+_DISCOVER_DESCRIPTION = (
+    "Discover AND queue post links in ONE step: run a JS snippet that RETURNS an array of "
+    "{title, href} objects (href MUST be the full URL including any xsec_token). The links are "
+    "queued directly for later extraction — no re-typing, dedup automatic. PREFER this over "
+    "run_js + save_candidates. The JS must return real values, never placeholders. Returns how "
+    "many NEW links were queued."
+)
+
+
 _SAVE_ITEMS_DESCRIPTION = (
     "Collect structured records into the run's store for later synthesis. Pass a "
     "JSON array of objects with whatever fields fit the task, containing the ACTUAL "
@@ -158,12 +189,33 @@ _EXTRACT_AND_SAVE_DESCRIPTION = (
 )
 
 
-def build_tools(store: "CollectedStore | None" = None) -> Tools:
-    """Return a Tools registry with defaults + `run_js` (CodeAct) + `save_items`."""
+def build_tools(store: "CollectedStore | None" = None,
+                ledger: "VisitedLedger | None" = None) -> Tools:
+    """Return a Tools registry with defaults + `run_js` (CodeAct) + collection tools.
+
+    When ``ledger`` is given, ``extract_and_save``/``save_items`` dedup by canonical
+    note id (skipping already-saved posts) and a ``save_candidates`` tool becomes
+    available for the durable discovery queue.
+    """
     tools = Tools()
 
     # Holds the last run_js result so save_items can backfill placeholders.
     last_js: dict = {"value": None}
+
+    def _persist(items: list[dict]) -> tuple[int, int]:
+        """Append records to the store, deduping via the ledger. Returns (saved, dup)."""
+        saved = dup = 0
+        for it in items:
+            url = str(it.get("url") or it.get("href") or "")
+            note_id = it.get("note_id") or (parse_note_id(url) if ledger else None)
+            if ledger and note_id and ledger.is_saved(note_id):
+                dup += 1
+                continue
+            store.append_items([it])  # type: ignore[union-attr]
+            if ledger and note_id:
+                ledger.mark(note_id, url=url, title=str(it.get("title", ""))[:200], status="saved")
+            saved += 1
+        return saved, dup
 
     @tools.action(_RUN_JS_DESCRIPTION, param_model=RunJsAction)
     async def run_js(params: RunJsAction, browser_session: BrowserSession):  # noqa: ANN202
@@ -193,12 +245,14 @@ def build_tools(store: "CollectedStore | None" = None) -> Tools:
                     error="extract_and_save: JS must RETURN an object or array of objects "
                     "with the extracted fields (got nothing usable)."
                 )
-            total = store.append_items(items)
-            logger.info("extract_and_save: +%d (total %d)", len(items), total)
-            return ActionResult(
-                extracted_content=f"Extracted & saved {len(items)} item(s); {total} collected so far.",
-                include_extracted_content_only_once=True,
-            )
+            saved, dup = _persist(items)
+            total = store.count()
+            logger.info("extract_and_save: +%d saved, %d dup (total %d)", saved, dup, total)
+            msg = f"Saved {saved} new item(s)"
+            if dup:
+                msg += f", skipped {dup} already-seen"
+            msg += f"; {total} collected so far."
+            return ActionResult(extracted_content=msg, include_extracted_content_only_once=True)
 
         @tools.action(_SAVE_ITEMS_DESCRIPTION, param_model=SaveItemsAction)
         async def save_items(params: SaveItemsAction):  # noqa: ANN202
@@ -217,11 +271,58 @@ def build_tools(store: "CollectedStore | None" = None) -> Tools:
                     "Pass the ACTUAL extracted values, or use extract_and_save to save a "
                     "run_js result directly."
                 )
+            saved, dup = _persist(items)
+            total = store.count()
+            logger.info("save_items: +%d saved, %d dup (total %d)", saved, dup, total)
+            msg = f"Saved {saved} new item(s)"
+            if dup:
+                msg += f", skipped {dup} already-seen"
+            msg += f"; {total} collected so far."
+            return ActionResult(extracted_content=msg, include_extracted_content_only_once=True)
 
-            total = store.append_items(items)
-            logger.info("save_items: +%d (total %d)", len(items), total)
+    if ledger is not None:
+
+        @tools.action(_DISCOVER_DESCRIPTION, param_model=RunJsAction)
+        async def discover_candidates(params: RunJsAction, browser_session: BrowserSession):  # noqa: ANN202
+            value, err = await _eval_js(browser_session, params.code)
+            if err:
+                return ActionResult(error=f"discover_candidates {err}")
+            last_js["value"] = value
+            items = value if isinstance(value, list) else [value]
+            items = [it for it in items if isinstance(it, dict)]
+            if not items:
+                return ActionResult(
+                    error="discover_candidates: JS must RETURN an array of {title, href} objects "
+                    "(href including any xsec_token)."
+                )
+            added = ledger.add_candidates(items)
+            pending = ledger.pending_count()
+            logger.info("discover_candidates: +%d new (pending %d)", added, pending)
             return ActionResult(
-                extracted_content=f"Saved {len(items)} item(s); {total} collected so far.",
+                extracted_content=f"Queued {added} new link(s); {pending} pending to open.",
+                include_extracted_content_only_once=True,
+            )
+
+        @tools.action(_SAVE_CANDIDATES_DESCRIPTION, param_model=SaveCandidatesAction)
+        async def save_candidates(params: SaveCandidatesAction):  # noqa: ANN202
+            try:
+                data = json.loads(params.items_json)
+            except json.JSONDecodeError:
+                # The model likely passed a placeholder referencing the last run_js
+                # result; fall back to it instead of failing.
+                data = last_js["value"]
+            items = data if isinstance(data, list) else [data]
+            items = [it for it in items if isinstance(it, dict)]
+            if not items:
+                return ActionResult(
+                    error="save_candidates: pass a JSON array of {title, href}, or use "
+                    "discover_candidates to queue a run_js result directly."
+                )
+            added = ledger.add_candidates(items)
+            pending = ledger.pending_count()
+            logger.info("save_candidates: +%d new (pending %d)", added, pending)
+            return ActionResult(
+                extracted_content=f"Queued {added} new link(s); {pending} pending to open.",
                 include_extracted_content_only_once=True,
             )
 

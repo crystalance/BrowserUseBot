@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS runs (
     steps INTEGER NOT NULL,
     needed_human INTEGER NOT NULL,
     latency_s REAL NOT NULL,
-    summary TEXT
+    summary TEXT,
+    request_id TEXT
 );
 """
 
@@ -40,14 +41,18 @@ class RunStore:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(db_path)
         self._db.execute(_SCHEMA)
+        # Migrate older DBs that predate the request_id column.
+        cols = {r[1] for r in self._db.execute("PRAGMA table_info(runs)")}
+        if "request_id" not in cols:
+            self._db.execute("ALTER TABLE runs ADD COLUMN request_id TEXT")
         self._db.commit()
 
     def record(self, *, goal: str, ok: bool, steps: int, needed_human: bool,
-               latency_s: float, summary: str) -> None:
+               latency_s: float, summary: str, request_id: str | None = None) -> None:
         self._db.execute(
-            "INSERT INTO runs (ts, goal, ok, steps, needed_human, latency_s, summary)"
-            " VALUES (?,?,?,?,?,?,?)",
-            (time.time(), goal, int(ok), steps, int(needed_human), latency_s, summary),
+            "INSERT INTO runs (ts, goal, ok, steps, needed_human, latency_s, summary, request_id)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            (time.time(), goal, int(ok), steps, int(needed_human), latency_s, summary, request_id),
         )
         self._db.commit()
 

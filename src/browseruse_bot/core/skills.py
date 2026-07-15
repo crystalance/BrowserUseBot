@@ -11,6 +11,7 @@ Skill file format (Markdown)::
     One-line description.
 
     Triggers: xiaohongshu, 小红书, 面经
+    Intent-Triggers: 搜索, search, 面经, 整理   (optional; if set, one must be present)
     Allowed-Hosts: xiaohongshu.com        (optional)
     Login-Hosts: xiaohongshu.com          (optional)
 
@@ -39,19 +40,31 @@ class Skill:
     name: str
     description: str = ""
     triggers: list[str] = field(default_factory=list)
+    intent_triggers: list[str] = field(default_factory=list)
     instructions: str = ""
     allowed_hosts: list[str] = field(default_factory=list)
     login_hosts: list[str] = field(default_factory=list)
     path: Path | None = None
 
     def score(self, request: str) -> int:
-        """How many triggers appear in the request (case-insensitive)."""
+        """Relevance of this skill to the request (0 = not applicable).
+
+        If the skill declares ``Intent-Triggers``, at least one must be present
+        (a bare site name like 小红书 is no longer enough to auto-apply it). Intent
+        hits are weighted above plain context triggers.
+        """
         r = request.lower()
+        if self.intent_triggers:
+            intent_hits = sum(1 for t in self.intent_triggers if t and t.lower() in r)
+            if intent_hits == 0:
+                return 0
+        else:
+            intent_hits = 0
         hits = sum(1 for t in self.triggers if t and t.lower() in r)
-        # Also match on the skill name words as a weak fallback.
-        if not hits and self.name.lower() in r:
-            hits = 1
-        return hits
+        score = intent_hits * 2 + hits
+        if score == 0 and self.name.lower() in r:
+            score = 1
+        return score
 
     def build_task(self, request: str) -> str:
         """Prepend the skill instructions to the user's request."""
@@ -92,6 +105,8 @@ def parse_skill(text: str, path: Path | None = None) -> Skill | None:
         key = s.lower()
         if key.startswith("triggers:"):
             skill.triggers = _split_csv(s.split(":", 1)[1])
+        elif key.startswith("intent-triggers:"):
+            skill.intent_triggers = _split_csv(s.split(":", 1)[1])
         elif key.startswith("allowed-hosts:"):
             skill.allowed_hosts = _split_csv(s.split(":", 1)[1])
         elif key.startswith("login-hosts:"):

@@ -9,7 +9,12 @@ dist/
 
 # Secrets & local state
 .env
-workspace/
+# Ignore all local workspace state EXCEPT the harvested results, which we keep
+# (per-environment: workspace/harvest/<production|dev|test>/...). The binary
+# ledger is regenerable, so it stays out of git.
+workspace/*
+!workspace/harvest/
+workspace/harvest/**/ledger.sqlite
 
 # Tooling
 .ruff_cache/

@@ -13,3 +13,6 @@ load_dotenv()  # local .env overrides
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")  # restrict to your chat
+
+# Optional: enables a clickable Langfuse deep link in Telegram replies.
+LANGFUSE_PROJECT_ID = os.getenv("LANGFUSE_PROJECT_ID", "")

@@ -20,7 +20,11 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 from browseruse_bot import BrowserAgentRunner, TaskPolicy
+from browseruse_bot.core.harvest import load_companies, parse_harvest_request
+from browseruse_bot.core.ids import new_request_id
 from browseruse_bot.core.logging_setup import setup_logging
+from browseruse_bot.core.observability import trace_url
+from browseruse_bot.core.router import route_request
 from browseruse_bot.core.skills import SkillStore
 from browseruse_bot.platform.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 from browseruse_bot.platform.novnc_view import NoVncView
@@ -46,6 +50,7 @@ class TelegramGateway:
         self._novnc: NoVncView | None = None
         self._tunnel: Tunnel | None = None
         self.skills = SkillStore()
+        self.companies = load_companies()
 
     def _authorized(self, update: Update) -> bool:
         if not TELEGRAM_CHAT_ID:
@@ -94,7 +99,49 @@ class TelegramGateway:
         self._busy = True
         self._chat_id = str(update.effective_chat.id)
 
-        # Auto-match a skill and steer the task with its instructions + policy.
+        # A request id ties this task's Telegram message → Langfuse trace → SQLite
+        # row → transcript. Echo it (and a trace link, if resolvable) up front.
+        request_id = new_request_id()
+        link = trace_url(request_id)
+        header = f"🆔 {request_id}"
+        if link:
+            header += f"\n🔎 trace: {link}"
+
+        # Route A — LLM intent router: is this a company 面经 harvest? It reads the
+        # request and extracts company/source/scope (robust to phrasing). Falls back
+        # to keyword parsing only if the router errors.
+        try:
+            spec = await route_request(goal, self.companies, llm=self.runner._llm)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("intent router failed, using keyword fallback: %s", e)
+            spec = parse_harvest_request(goal, self.companies)
+        if spec:
+            company = spec.company
+            scope = spec.scope_raw or "all"
+            await update.message.reply_text(
+                f"{header}\n🏢 {company.name} 面经 · scope: {scope} · source: {spec.source} "
+                f"(target {spec.target})…"
+            )
+
+            async def _progress(chunk: int, saved: int, pending: int) -> None:
+                await update.message.reply_text(
+                    f"📈 chunk {chunk} · saved {saved}/{spec.target} · pending {pending}"
+                )
+
+            try:
+                result = await self.runner.run_harvest(
+                    spec, request_id=request_id, on_progress=_progress
+                )
+                await update.message.reply_text(
+                    f"{'✅' if result.ok else '⚠️'} {request_id}\n{result.summary[:3500]}"
+                )
+            except Exception as e:  # noqa: BLE001
+                await update.message.reply_text(f"❌ {request_id} harvest failed: {e}")
+            finally:
+                self._busy = False
+            return
+
+        # Route B — auto-match a skill and steer the task with its instructions + policy.
         skill = self.skills.match(goal)
         policy = TaskPolicy()
         task = goal
@@ -104,16 +151,16 @@ class TelegramGateway:
                 policy.allowed_hosts = skill.allowed_hosts
             if skill.login_hosts:
                 policy.login_hosts = skill.login_hosts
-            await update.message.reply_text(f"🧩 Using skill: {skill.name}\n▶️ Running: {goal}")
+            await update.message.reply_text(f"{header}\n🧩 Using skill: {skill.name}\n▶️ Running: {goal}")
         else:
-            await update.message.reply_text(f"▶️ Running: {goal}")
+            await update.message.reply_text(f"{header}\n▶️ Running: {goal}")
         try:
-            result = await self.runner.run_task(task, policy)
+            result = await self.runner.run_task(task, policy, request_id=request_id)
             await update.message.reply_text(
-                f"{'✅' if result.ok else '⚠️'} {result.summary[:3500]}"
+                f"{'✅' if result.ok else '⚠️'} {request_id}\n{result.summary[:3500]}"
             )
         except Exception as e:  # noqa: BLE001
-            await update.message.reply_text(f"❌ task failed: {e}")
+            await update.message.reply_text(f"❌ {request_id} task failed: {e}")
         finally:
             self._busy = False
 

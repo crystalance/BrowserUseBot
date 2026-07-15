@@ -103,5 +103,6 @@ Trace summary: wall 514.6s, LLM 228.4s (44%), non-LLM browser overhead 286s (56%
 - [ ] (1) Switch agent model to `gpt-4.1` (keep tracing to measure before/after).
 - [x] (2) Skip screenshot capture when `USE_VISION=false` (`_disable_screenshots` in
   `core/runner.py`). Removes the always-on capture + the 15s stall risk.
-- [ ] (3) Tighten skill matching so a broad keyword like "小红书" alone doesn't force a
-  search skill onto non-search tasks.
+- [x] (3) Tighten skill matching: added `Intent-Triggers` to the skill format
+  (`core/skills.py`); a bare site name like "小红书" no longer auto-applies a skill.
+  Company 面经 requests now route to the dedicated harvester before skill matching.
