@@ -1,6 +1,6 @@
 [
   {"key":"google",     "name":"Google",     "aliases":["谷歌","google","goog"],                     "queries":["google 面经","谷歌 面经","google ng 面经","google oa"], "target":60, "source":"xiaohongshu"},
-  {"key":"amazon",     "name":"Amazon",     "aliases":["亚马逊","amazon","amzn","aws"],              "queries":["amazon 面经","亚马逊 面经","amazon ng 面经","amazon oa","amazon vo"], "target":60, "source":"xiaohongshu"},
+  {"key":"amazon",     "name":"Amazon",     "aliases":["亚马逊","amazon","amzn","aws","亚麻"],              "queries":["amazon 面经","亚马逊 面经","amazon ng 面经","amazon oa","amazon vo"], "target":60, "source":"xiaohongshu"},
   {"key":"meta",       "name":"Meta",       "aliases":["facebook","meta","脸书","fb"],               "queries":["meta 面经","facebook 面经","meta ng 面经"], "target":55, "source":"xiaohongshu"},
   {"key":"microsoft",  "name":"Microsoft",  "aliases":["微软","microsoft","msft"],                   "queries":["microsoft 面经","微软 面经","microsoft ng 面经"], "target":55, "source":"xiaohongshu"},
   {"key":"apple",      "name":"Apple",      "aliases":["苹果","apple"],                              "queries":["apple 面经","苹果 面经","apple ng 面经"], "target":50, "source":"xiaohongshu"},

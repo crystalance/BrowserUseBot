@@ -1,8 +1,14 @@
 # Design: Supervised Browser-Agent Platform ("on-call agent")
 
-> Draft v0.1 · 2026-06-26 · status: proposal / for review
+> Draft v0.2 · 2026-07-17 · status: reflects built system + extensibility redesign
 > A 24/7-available agent you talk to over Telegram that runs browser + API tasks
 > on demand and on schedule, and hands off login to you (the human) when needed.
+>
+> **v0.2 note:** the built system now has the Telegram gateway, browser-use runtime,
+> human login handoff, observability (Langfuse), and ONE specialized capability — the
+> **rednote batch-crawl** (efficient long-horizon post collection). §4–§4.5 are rewritten
+> to make adding *new* capabilities a plug-in, not a refactor — and to resolve the
+> "rigid pipeline vs. hallucination-prone skill" tension.
 
 ---
 
@@ -76,62 +82,157 @@ machinery than the current milestone needs, **do the simpler thing**.
 | **Login handoff** | When a `browser` step needs auth, the agent exposes a live remote browser and pings the human to log in. |
 | **Workspace** | Persistent store for task state, artifacts, sessions/cookies, logs, memory. |
 | **Scheduler** | Triggers recurring tasks (daily sweep) and re-tries. |
+| **Capability** | A registered, self-describing unit of specialized behavior the router can dispatch to (e.g. `BatchCrawl`). Owns its orchestration + tools. **Code-backed → reliable + efficient.** |
+| **Tool** | A single deterministic action the agent may call (`run_js`, `extract_and_save`, `open_search`, `open_next_post`, `request_login`). Constrains *what the LLM can do*. |
+| **Skill** | A prompt recipe (Markdown) that *steers* the general agent. Flexible + user-authorable, but hallucination-prone → for low-risk one-shots only. |
+| **Source adapter** | Site-specific glue *inside* a capability (search URL, discover/extract JS, id parsing). Swapping it ports `BatchCrawl` to a new site without touching the engine. |
 
 ---
 
-## 4. Architecture
+## 4. Architecture (v0.2 — capability-layered)
+
+The system is three layers: a **control plane** (route intent), a **capability layer**
+(pluggable specialized behaviors), and a **shared substrate** (the browser runtime,
+tools, handoff, persistence, observability). Clients are just one more edge.
 
 ```mermaid
 flowchart TB
-    subgraph User
-      TG[Telegram app on phone/desktop]
-      BR[Browser - opens remote view for login]
+    subgraph Clients
+      TG[Telegram]
+      APIc[REST/WS API - future]
+    end
+    subgraph Control[Control plane]
+      GW[Gateway]
+      RT[Intent Router - LLM]
+      REG[Capability Registry]
+    end
+    subgraph Caps[Capability layer - pluggable]
+      GB[GeneralBrowse\nbase agent + general tools]
+      BC[BatchCrawl\norchestrator + ledger + harvest tools]
+      FUT[... future capabilities]
+    end
+    subgraph Sub[Shared substrate]
+      RUN[BrowserAgentRunner\nbrowser-use + persistent session]
+      HO[Login handoff]
+      TOOLS[General tools\nrun_js / extract_and_save / request_login]
+      LEDG[(Workspace\nledger / collected / logs)]
+      OBS[Observability - Langfuse]
+    end
+    subgraph Adapters[Source adapters - sub-plugin of BatchCrawl]
+      XHS[Xiaohongshu]
+      LI[LinkedIn / Blind - future]
     end
 
-    subgraph Host[Always-on sandbox host]
-      Bot[Telegram Bot Gateway]
-      Sup[Agent Supervisor / planner]
-      Sched[Scheduler - cron + retries]
-      subgraph Exec[Executors]
-        API[API source adapters\nGreenhouse/Lever/Ashby/RSS]
-        BU[browser-use runtime\n+ persistent profile]
-      end
-      Remote[Remote browser view\nnoVNC / CDP stream]
-      WS[(Workspace\nstate / artifacts / sessions / logs)]
-      Eval[Reliability + eval layer]
-    end
-
-    TG <--> Bot
-    Bot <--> Sup
-    Sched --> Sup
-    Sup --> API
-    Sup --> BU
-    API --> WS
-    BU --> WS
-    BU -. needs login .-> Remote
-    Remote -. live link .-> Bot
-    Bot -. "please log in" .-> TG
-    BR <--> Remote
-    Sup --> Eval
-    Eval --> WS
+    TG --> GW
+    APIc --> GW
+    GW --> RT
+    RT --> REG
+    REG --> GB
+    REG --> BC
+    REG --> FUT
+    GB --> RUN
+    BC --> RUN
+    BC --> Adapters
+    RUN --> TOOLS
+    RUN --> HO
+    RUN --> LEDG
+    RUN --> OBS
 ```
 
 ### Layer responsibilities
-- **Telegram Bot Gateway** — the only inbound surface. Parses commands, streams
-  progress, sends approval requests and login-handoff links.
-- **Agent Supervisor** — plans the task, picks source adapters, enforces policy
-  (allowed actions, approval gates), orchestrates steps, writes results.
-- **Source adapters** —
-  - `api`: typed fetchers for ATS/job APIs and RSS. Cheap, robust, no anti-bot.
-  - `browser`: browser-use, driving a real browser with a **persistent profile** so
-    sessions survive across tasks.
-- **Remote browser view** — on a login wall, the browser session is exposed
-  (noVNC or a CDP-based live view) behind a short-lived authenticated URL.
-- **Scheduler** — daily sweeps, backoff/retry, dedup of already-seen results.
-- **Workspace** — authoritative state: task records, artifacts, cookies/session,
-  logs, agent memory.
-- **Reliability + eval layer** — run status, success/failure, dedup metrics,
-  extraction accuracy, traces, alerting.
+- **Gateway** — the inbound surface (Telegram now; a REST/WS API later so the same
+  core serves a web app / CLI). Streams progress, delivers login-handoff links.
+- **Intent Router (LLM)** — reads the raw request and picks a capability + extracts its
+  parameters (site, target, scope). This is where *flexibility* lives; it is an LLM
+  call, not keyword matching. Falls back to `GeneralBrowse`.
+- **Capability Registry** — capabilities self-register with a `key` + `description`.
+  The router's menu is *built from the registry*, so adding a capability needs **no**
+  router edit.
+- **Capability layer** — each capability owns its orchestration and tools:
+  - `GeneralBrowse`: the base browser-use agent + general tools, for one-off tasks.
+  - `BatchCrawl`: the long-horizon harvester — chunked fresh-agent loop over a shared
+    session, a durable ledger (dedup + queue), and harvest tools (`open_search`,
+    `discover_candidates`, `open_next_post`, `extract_and_save`), plus a **source
+    adapter** for site specifics. This is the efficient path the base agent can't do.
+- **Shared substrate** — `BrowserAgentRunner` (browser-use + persistent profile),
+  login handoff, the general tool registry, the workspace/ledger, and observability.
+  Every capability composes these; none re-implements them.
+- **Source adapters** — site-specific glue *within* `BatchCrawl` (search URL, discover
+  /extract JS, note-id parsing). Adding a site = a new adapter, not a new pipeline.
+
+---
+
+## 4.5 Capability architecture — extensible without refactor, reliable without hallucination
+
+**The problem (observed).** Today there is one hardcoded capability (rednote crawl).
+There are three ways to add behavior, each with a flaw:
+
+| Approach | Extensible? | Reliable / efficient? | Flaw |
+|---|---|---|---|
+| **Hardcoded pipeline** (current crawler) | ❌ new task = refactor | ✅ | rigid; doesn't scale to many task types |
+| **Prompt skill** (Markdown recipe) | ✅ drop-in | ❌ | LLM hallucinates the steps; no guarantees for long/stateful work |
+| **Pure general agent** | ✅ | ❌ for long tasks | inefficient/unreliable — the reason `BatchCrawl` exists |
+
+**The resolution: split responsibility — the LLM owns *judgment*, code owns *guarantees*.**
+
+> Skills tell the LLM **what to do** (fragile). Capabilities give the LLM **tools that
+> do it right** (robust). The fix is to move must-be-correct logic out of the *prompt*
+> and into *code/tools* — the agent can only do what its tools allow, so hallucination
+> cannot corrupt the reliable core.
+
+**A Capability is a registered, self-describing plug-in:**
+
+```python
+class Capability(Protocol):
+    key: str                 # "batch_crawl"
+    description: str         # fed to the router LLM so it knows WHEN to pick this
+    async def run(self, request: str, params: dict, ctx: RunContext) -> Result
+```
+
+- Capabilities **self-register** into the registry; the **router menu is generated**
+  from their descriptions. **Adding a capability = new module + register(). No core edit.**
+- The router (LLM) decides *which* capability + fills typed params — flexible intent,
+  structured hand-off.
+
+**Two capability shapes (choose per need):**
+1. **Orchestrated capability** (e.g. `BatchCrawl`) — code-driven loop with state
+   (chunking, ledger, deterministic navigation/search, tools, adapter). Use for
+   long-horizon / stateful / reliability-critical work.
+2. **Skill** (prompt recipe) — lightweight steering of `GeneralBrowse`. Keep for the
+   **long tail** and user-authored one-shots where a wrong step is cheap.
+
+**Anti-hallucination levers (why capabilities are safe where skills aren't):**
+- **Constrain by tools, not prose** — the reliable actions (search URL, queue, dedup,
+  navigation, login handoff) are *tools/orchestration*, not instructions the model can
+  drift from.
+- **Deterministic core, fuzzy edges** — code owns the must-be-right parts; the LLM is
+  left only the genuinely judgmental parts (relevance, query phrasing, when to stop).
+- **Structured I/O at boundaries** — typed router output, typed records; validate at
+  the seam so bad data can't flow downstream.
+
+**Promotion path (gives flexibility *and* reliability):** a behavior starts as a
+**skill** (fast to author, no code). When it proves *repeated*, *long-horizon*, or
+*reliability-critical*, **promote it to an orchestrated capability** — lift the fragile
+prompt steps into tools + a small orchestrator. You pay engineering cost only where it
+earns its keep (per §0, Occam). The rednote crawler is exactly this: a search-and-
+collect *skill* that graduated into the `BatchCrawl` capability once it needed dedup,
+resume, and hundreds-of-posts scale.
+
+**How the current pieces map:**
+
+| Concern | Where it lives | Owner |
+|---|---|---|
+| "Is this a crawl or a one-off?" | Intent Router | LLM |
+| "Which company/site/scope?" | Router → typed params | LLM |
+| Search that actually works | `open_search` tool (direct results URL) | code |
+| No duplicate / resume | ledger + `open_next_post` | code |
+| Is *this post* relevant? | agent judgment at save time | LLM |
+| Login wall | heuristic + `request_login` tool | code + LLM |
+| Site specifics (JS, id, URL) | Source adapter | code |
+
+Net: **adding a new capability (e.g. "monitor a page", "fill a form", "apply to a job")
+is a new registered module reusing the substrate — no refactor of the core, and the
+reliability-critical parts are code, not hopeful prompting.**
 
 ---
 

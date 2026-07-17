@@ -14,6 +14,7 @@ import json
 import logging
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 from browser_use import Tools
 from browser_use.agent.views import ActionResult
@@ -156,6 +157,45 @@ class SaveCandidatesAction(BaseModel):
     )
 
 
+class OpenNextAction(BaseModel):
+    """No parameters — the harness picks the next queued post."""
+
+
+class OpenSearchAction(BaseModel):
+    query: str = Field(description="the search text, e.g. 'amazon 26ng sde 面经'")
+
+
+_OPEN_SEARCH_DESCRIPTION = (
+    "Open 小红书's search-RESULTS page for a query DIRECTLY (reliable — do not fight the "
+    "on-page search box, which often fails to submit). Pass the search text; the harness "
+    "navigates the browser straight to the results. ALWAYS use this to search before "
+    "discovering. After it loads, call discover_candidates to harvest the result cards."
+)
+
+
+_OPEN_NEXT_DESCRIPTION = (
+    "Open the NEXT queued post for extraction — the harness navigates the browser to it for "
+    "you (you never type or guess a URL). After it opens, call extract_and_save with the "
+    "extraction JS. Repeat open_next_post → extract_and_save until it reports the queue is "
+    "empty, then discover more. Returns the opened post's title/URL, or says the queue is empty."
+)
+
+
+class RequestLoginAction(BaseModel):
+    reason: str = Field(
+        default="", description="brief reason you're blocked, e.g. 'login modal / QR shown'"
+    )
+
+
+_REQUEST_LOGIN_DESCRIPTION = (
+    "Call this the moment a page shows a LOGIN / AUTHENTICATION wall that blocks you — a login "
+    "form, QR-code login, 'please sign in', SSO/OAuth prompt, or a modal covering the content on "
+    "ANY website. Do NOT try to dismiss or bypass it yourself. This hands off to the human, who "
+    "logs in via a secure link; it waits and then resumes you on the authenticated page. Returns "
+    "once login is complete."
+)
+
+
 _SAVE_CANDIDATES_DESCRIPTION = (
     "Queue discovered post links for later extraction. After harvesting result cards with "
     "run_js, pass the array of {title, href} here. The harness dedups and remembers them "
@@ -190,17 +230,35 @@ _EXTRACT_AND_SAVE_DESCRIPTION = (
 
 
 def build_tools(store: "CollectedStore | None" = None,
-                ledger: "VisitedLedger | None" = None) -> Tools:
+                ledger: "VisitedLedger | None" = None,
+                handoff=None) -> Tools:
     """Return a Tools registry with defaults + `run_js` (CodeAct) + collection tools.
 
     When ``ledger`` is given, ``extract_and_save``/``save_items`` dedup by canonical
     note id (skipping already-saved posts) and a ``save_candidates`` tool becomes
-    available for the durable discovery queue.
+    available for the durable discovery queue. When ``handoff`` is given, a
+    ``request_login`` tool lets the agent trigger the human login handoff on any site.
     """
     tools = Tools()
 
     # Holds the last run_js result so save_items can backfill placeholders.
     last_js: dict = {"value": None}
+
+    if handoff is not None:
+
+        @tools.action(_REQUEST_LOGIN_DESCRIPTION, param_model=RequestLoginAction)
+        async def request_login(params: RequestLoginAction):  # noqa: ANN202
+            ok = await handoff.request_login(params.reason or "")
+            if ok:
+                return ActionResult(
+                    extracted_content="Human completed login. You are now on the authenticated "
+                    "page — continue the task.",
+                    include_extracted_content_only_once=True,
+                )
+            return ActionResult(
+                extracted_content="Login was not completed (stopped or unavailable).",
+                include_extracted_content_only_once=True,
+            )
 
     def _persist(items: list[dict]) -> tuple[int, int]:
         """Append records to the store, deduping via the ledger. Returns (saved, dup)."""
@@ -281,6 +339,62 @@ def build_tools(store: "CollectedStore | None" = None,
             return ActionResult(extracted_content=msg, include_extracted_content_only_once=True)
 
     if ledger is not None:
+
+        served: set[str] = set()
+
+        @tools.action(_OPEN_SEARCH_DESCRIPTION, param_model=OpenSearchAction)
+        async def open_search(params: OpenSearchAction, browser_session: BrowserSession):  # noqa: ANN202
+            # Navigate straight to 小红书's search-results page (site-specific for now;
+            # moves behind a SourceAdapter when multi-site lands). Far more reliable
+            # than typing into the on-page search box.
+            q = quote((params.query or "").strip())
+            url = f"https://www.xiaohongshu.com/search_result?keyword={q}&source=web_explore_feed"
+            try:
+                await browser_session.navigate_to(url)
+            except Exception as e:  # noqa: BLE001
+                return ActionResult(error=f"open_search: could not open results for {params.query!r}: {e}")
+            logger.info("open_search: %r", params.query)
+            return ActionResult(
+                extracted_content=(
+                    f"Opened 小红书 search results for '{params.query}'. Now call "
+                    "discover_candidates to harvest the result cards on this page."
+                ),
+                include_extracted_content_only_once=True,
+            )
+
+        @tools.action(_OPEN_NEXT_DESCRIPTION, param_model=OpenNextAction)
+        async def open_next_post(params: OpenNextAction, browser_session: BrowserSession):  # noqa: ANN202
+            # Pick the next pending candidate not already served this chunk.
+            nxt = None
+            for c in ledger.next_candidates(200):
+                if c["note_id"] not in served:
+                    nxt = c
+                    break
+            if nxt is None:
+                pending = ledger.pending_count()
+                return ActionResult(
+                    extracted_content=(
+                        f"Queue empty — no more posts to open ({pending} pending). "
+                        "Discover more via on-site search, or finish."
+                    ),
+                    include_extracted_content_only_once=True,
+                )
+            served.add(nxt["note_id"])
+            href = nxt["href"]
+            try:
+                await browser_session.navigate_to(href)
+            except Exception as e:  # noqa: BLE001
+                return ActionResult(error=f"open_next_post: could not open {href}: {e}")
+            title = (nxt.get("title") or "").strip()
+            logger.info("open_next_post: opened %s", nxt["note_id"])
+            return ActionResult(
+                extracted_content=(
+                    f"Opened queued post{f' “{title}”' if title else ''}:\n{href}\n"
+                    "If it fits the task, call extract_and_save; if it's clearly unrelated, "
+                    "skip it and call open_next_post again."
+                ),
+                include_extracted_content_only_once=True,
+            )
 
         @tools.action(_DISCOVER_DESCRIPTION, param_model=RunJsAction)
         async def discover_candidates(params: RunJsAction, browser_session: BrowserSession):  # noqa: ANN202

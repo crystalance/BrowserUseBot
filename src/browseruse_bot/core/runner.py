@@ -231,7 +231,7 @@ class BrowserAgentRunner:
             llm=wrap_llm(base_llm, trace, label="agent_step"),
             browser_session=session,
             use_vision=self._use_vision,
-            tools=build_tools(collected),
+            tools=build_tools(collected, handoff=self.handoff),
         )
         self._agent = agent
 
@@ -323,9 +323,8 @@ class BrowserAgentRunner:
                     break
                 chunk += 1
                 before = ledger.saved_count()
-                batch_items = ledger.next_candidates(batch)
                 brief = build_chunk_brief(
-                    spec, saved=before, pending=ledger.pending_count(), batch=batch_items,
+                    spec, saved=before, pending=ledger.pending_count(),
                 )
                 ctrace = start_run_trace(
                     f"harvest {company.name} [{scope_slug}] chunk {chunk}",
@@ -338,7 +337,7 @@ class BrowserAgentRunner:
                     llm=wrap_llm(base_llm, ctrace, label="agent_step"),
                     browser_session=session,
                     use_vision=self._use_vision,
-                    tools=build_tools(store, ledger),
+                    tools=build_tools(store, ledger, handoff=self.handoff),
                 )
                 self._agent = agent
                 try:

@@ -133,15 +133,10 @@ def parse_harvest_request(goal: str, companies: dict[str, Company]) -> HarvestSp
     return build_spec(company, source=source, scope=scope, target=company.target)
 
 
-def build_chunk_brief(spec: HarvestSpec, *, saved: int, pending: int, batch: list[dict]) -> str:
-    """Compact brief for one chunk. Carries counts + a small URL batch, never history."""
+def build_chunk_brief(spec: HarvestSpec, *, saved: int, pending: int) -> str:
+    """Compact brief for one chunk. Carries counts only — the harness serves URLs."""
     company = spec.company
     scope = spec.scope_raw or "all roles/years"
-    lines = []
-    for c in batch:
-        title = (c.get("title") or "").strip()[:60]
-        lines.append(f"- {c.get('href')}  ({title})")
-    batch_block = "\n".join(lines) if lines else "(none queued — discover more by searching)"
     return (
         f"You are collecting Chinese interview-experience posts (面经) for "
         f"**{company.name}** on 小红书 (xiaohongshu.com), specifically for scope: "
@@ -149,10 +144,20 @@ def build_chunk_brief(spec: HarvestSpec, *, saved: int, pending: int, batch: lis
         f"posts that match this scope; skip clearly-unrelated ones.\n\n"
         f"Progress: {saved}/{spec.target} posts saved. {pending} posts queued to open. "
         f"Work efficiently; duplicates are auto-skipped so don't worry about overlap.\n\n"
-        f"STEP 1 — Open the queued posts below. For EACH href, navigate to it in the SAME tab, "
-        f"then call `extract_and_save` with ONE run_js that RETURNS "
-        f"{{note_id, url, title, body, date}} where body is the FULL 正文 text:\n"
-        f"{batch_block}\n\n"
+        f"STEP 1 — SEARCH FIRST (if nothing is queued). Call `open_search` with a query like "
+        f"'{spec.queries[0] if spec.queries else company.name + ' 面经'}' — it loads 小红书's "
+        f"results page directly (do NOT type into the on-page search box; it fails). Then call "
+        f"`discover_candidates` (JS returning an array of {{title, href}} with full xsec_token "
+        f"URLs) to queue the RESULT cards. Example discover JS: "
+        f"(() => Array.from(document.querySelectorAll('a[href*=\"/explore/\"], a[href*=\"/search_result/\"]'))"
+        f".map(a => ({{title:(a.innerText||'').trim(), href:a.href}})).filter(x => x.href.includes('xsec_token'))). "
+        f"Scroll 1–2× and discover again to grow the queue.\n\n"
+        f"STEP 2 — DRAIN THE QUEUE. Call `open_next_post` — the harness navigates the browser "
+        f"to the next queued post for you (never type or guess a post URL). Once it opens, call "
+        f"`extract_and_save` with ONE run_js that RETURNS {{note_id, url, title, body, date}} "
+        f"where body is the FULL 正文 text. If the opened post is clearly NOT about {company.name} "
+        f"{scope}, skip it and call open_next_post again. Repeat until the queue is empty, then go "
+        f"back to STEP 1 with another query variant ({', '.join(spec.queries[1:4])}).\n"
         f"  Extraction JS shape:\n"
         f"  (() => {{ const m = document.querySelector('#noteContainer, .note-detail-mask, "
         f"[class*=\"note-detail\"]') || document.body; return {{ url: location.href, "
@@ -160,14 +165,7 @@ def build_chunk_brief(spec: HarvestSpec, *, saved: int, pending: int, batch: lis
         f"title: (m.querySelector('#detail-title, .title, h1')?.innerText||document.title||'').trim(), "
         f"body: (m.querySelector('#detail-desc, .note-content, .desc, article')?.innerText||m.innerText||'').trim().slice(0,6000), "
         f"date: (m.querySelector('.date, time, [class*=\"date\"]')?.innerText||'').trim() }}; }})\n\n"
-        f"STEP 2 — When the queue is empty (or you've opened this batch), DISCOVER more: use the "
-        f"on-site search box with queries like {', '.join(spec.queries[:4])}. Harvest result "
-        f"cards with ONE `discover_candidates` call whose JS RETURNS an array of {{title, href}} "
-        f"(href MUST be the full URL including the xsec_token) — they are queued directly, so you "
-        f"never re-type them. Example JS: (() => Array.from(document.querySelectorAll("
-        f"'a[href*=\"/explore/\"], a[href*=\"/search_result/\"]')).map(a => ({{title:(a.innerText||"
-        f"'').trim(), href:a.href}})).filter(x => x.href.includes('xsec_token'))). Scroll 1–2× and "
-        f"repeat to grow the queue.\n\n"
-        f"Do NOT summarize — a later step organizes everything. Keep going until you've made solid "
-        f"progress this round."
+        f"If a LOGIN wall / popup ever blocks you, call `request_login` (do NOT try to close or "
+        f"bypass it yourself). Do NOT summarize — a later step organizes everything. Keep going "
+        f"until you've made solid progress this round."
     )

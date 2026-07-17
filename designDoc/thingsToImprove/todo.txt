@@ -89,3 +89,86 @@ Best depth-picks for interviews: A (observability) + B (latency) + D (evals).
 
 --- message queue---
 
+
+====================================================================
+PLATFORM ARCHITECTURE + LATENCY/COST (product view — for sell / open-source)
+Reframe: this is NOT a scraper. It is an "authenticated browser-agent platform".
+The MOAT = the human-in-the-loop login handoff -> the agent acts inside the user's
+AUTHENTICATED sessions, reaching data/actions public APIs and naive agents cannot.
+Optimize the whole architecture around that.
+====================================================================
+
+--- P1. ARCHITECTURE (make it a platform, not a monolith) ---
+P1.1 Split control plane (stateless: API gateway, auth, orchestration, billing,
+     observability) from data plane (stateful: browser + agent runtime, 1 per
+     active session).  [Demonstrates: system decomposition, scalability]
+P1.2 API-first. Telegram becomes ONE client of a public REST/WS/SDK API -> also
+     enables web app / CLI / Slack / Zapier.  [Demonstrates: platform thinking]
+P1.3 Session/Identity layer = the crown jewel. Per-user isolated persistent
+     browser profiles (cookies/storage), encrypted at rest. Session lifecycle as
+     a first-class state machine: needs-login -> human handoff -> active ->
+     expiring -> re-auth. Anti-bot wall is a STATE, not a failure. Never store raw
+     passwords — store the SESSION obtained via handoff.
+     [Demonstrates: identity/session design, security posture]
+P1.4 Multi-tenancy & isolation as a hard requirement (you run code inside people's
+     logged-in accounts): sandboxed browser per session (container/net namespace),
+     egress control, audit log of every action on the user's behalf, kill switch.
+     [Demonstrates: security boundaries, blast-radius thinking]
+P1.5 Job orchestration: queue (Redis/SQS) + workers with SESSION AFFINITY (route a
+     task to the worker holding that user's warm browser). Concurrency + horizontal
+     scale + graceful restart.  [Demonstrates: distributed systems]
+P1.6 Extensibility for OSS adoption:
+      - Tool/skill plugin API (versioned) — third parties extend without forking.
+      - Pluggable LLM + BYO-key (generalize build_llm()).
+      - Pluggable source/site adapters (generalize the harvester SourceAdapter).
+P1.7 Self-hostable (OSS core, `docker compose`) + managed tier (browser pool,
+     secrets mgr, dashboard). Standard OSS-SaaS split.
+
+--- P2. LATENCY (attack the per-step round-trip, model-agnostic) ---
+Measured reality (Langfuse): ~24s/step, prompt-bound; model swap did NOT help.
+Per-step cost = LLM(prompt) + DOM serialize + CDP. Levers, biggest first:
+P2.1 Context/DOM reduction (dominant lever): send a pruned accessibility tree +
+     DOM DELTAS (what changed since last step), not the full 15-40k-token DOM each
+     step. Hard token budget.  [Demonstrates: context engineering]
+P2.2 Prompt caching: the big system prompt + stable page chrome are re-sent every
+     step; use OpenAI/Anthropic prompt caching on the repeated prefix. Near-free.
+P2.3 Model routing/tiering: small fast model for routine steps (scroll/click/
+     extract), large model only for planning/ambiguity.  [Demonstrates: routing]
+P2.4 Do more per LLM call (CodeAct): one run_js that loops over N items instead of
+     one LLM round-trip per item.
+P2.5 Warm browser pool: cold Chromium launch ~30s (BrowserStartEvent timeouts).
+     Keep pre-launched, pre-authenticated browsers; check one out per job.
+P2.6 Parallelism: async extraction across multiple tabs/CDP targets vs serial
+     click->extract.
+P2.7 Compiled/deterministic skills: record a successful trajectory once, REPLAY it
+     without the LLM (LLM only on drift). 40-step LLM task -> ~0 LLM calls.
+     [Demonstrates: caching/compilation, the biggest latency+cost cut]
+P2.8 Streaming/perceived latency: stream step goals + partial results.
+
+--- P3. COST (same knobs + infra) ---
+P3.1 Tokens are ~90% of LLM cost -> P2.1 (DOM prune) + P2.2 (prompt cache) +
+     P2.3 (tiering) are the cost levers too.
+P3.2 Cost attribution + budgets: already trace $/run in Langfuse; add per-task /
+     per-user budget caps and a "cheap mode" (smaller model, tighter DOM).
+P3.3 Offline/batch synthesis on the cheapest model (Phase-2 synthesizer is already
+     browser-less -> run it on a batch/cheap tier).
+P3.4 Infra amortization: browser pooling + scale-to-zero workers + spot instances.
+     A warm pool shared across users beats one browser per task.
+P3.5 Semantic/result caching: dedupe repeated sub-tasks across users (respect
+     isolation).
+P3.6 Compiled skills (P2.7) eliminate LLM cost entirely for routine flows — the
+     single biggest cost cut for high-volume tasks.
+
+--- P4. PRODUCTIZATION GATES (can't skip — you hold authenticated sessions) ---
+P4.1 Sandbox run_js (arbitrary agent-authored JS in a logged-in session) — audit +
+     constrain.
+P4.2 Secrets management: rotate the plaintext OpenAI key; vault session cookies.
+P4.3 Audit log of every action taken on a user's behalf + kill switch.
+P4.4 ToS/anti-bot posture: rate-limit, human-paced pacing, explicit per-site user
+     consent.
+
+Thesis (for reviewer/investor): "An API-first, multi-tenant platform for agents
+that act inside users' authenticated browser sessions — with a warm browser pool,
+DOM-delta context compression, model routing, and compiled deterministic skills to
+keep latency and cost flat as usage scales."
+
