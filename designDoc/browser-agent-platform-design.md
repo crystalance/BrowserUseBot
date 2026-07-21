@@ -269,18 +269,30 @@ Design notes:
 - 2FA never touches the agent — the human does it.
 - **Fallback (Option 2, cookie-sync)** kept as a simpler path for MVP testing: human
   logs in locally, exports storage state, agent imports it.
-### Transport decision: CDP screencast (not noVNC)
+### Transport decision: noVNC (switched from CDP screencast)
 
-The live view is served as a **CDP screencast page** over a short-lived tunnel, **not** a
-full noVNC desktop. Reasons:
-- **Smaller surface**: streams a single tab, not the whole sandbox display → smaller
-  blast radius for a security-sensitive login screen.
-- **Reuse**: browser-use already drives the page over CDP, so we reuse that connection
-  instead of standing up a separate VNC server.
-- **Mobile-friendly**: renders cleanly in Telegram's in-app browser on a phone; lighter
-  payload → lower latency than full-desktop VNC.
-- **No domain required for MVP**: served behind a free Cloudflare Tunnel (`*.trycloudflare.com`)
-  with a token-gated URL; buy a stable domain only later for a branded link.
+**Decision (updated 2026-07): use noVNC for the login-handoff live view.** The original
+plan was a single-tab **CDP screencast** page (smaller surface, reuses browser-use's CDP
+connection). In practice the screencast proved **flaky for an *interactive* login** — the
+input bridge dropped mid-session (`Cannot write to closing transport`), and a screencast
+is view-oriented, not built for the human to click / type / scan-QR reliably. noVNC gives
+a **genuine interactive session** that just works for authentication.
+
+Why noVNC wins for this use case:
+- **Reliable interaction**: real mouse/keyboard/QR-scan on the actual page — the whole
+  point of the handoff — instead of a fragile screencast input bridge.
+- **Fits the deployment**: on the AWS Linux host the agent already runs a **headful
+  Chromium under Xvfb**; exposing that display via `websockify` + noVNC is a robust,
+  well-trodden stack (see `scripts/run-aws.sh`, `HANDOFF=novnc`).
+- **Mobile-friendly**: renders and takes touch input in Telegram's in-app browser on a
+  phone.
+- **No domain required**: served behind a free Cloudflare Tunnel (`*.trycloudflare.com`)
+  with a short-lived, token-gated URL.
+
+Tradeoff (accepted): a VNC of the display is a **larger surface** than a single tab. We
+mitigate by scoping the exposed display to a **single browser window** (Xvfb + a minimal
+WM), keeping the URL **short-lived, single-use, token-gated**, and tearing it down
+immediately after `/done`.
 ---
 
 ## 6. Data-source strategy (API-first)
@@ -366,8 +378,10 @@ Without this it's a script; with it, it's an AI-engineering project.
 - **Language**: Python (reuse existing `agent/` infra: `bot.py`, `scheduler.py`,
   `server.py`, `session.py`).
 - **Browser**: browser-use (open-source) + persistent Chrome profile.
-- **Remote view**: **CDP screencast page** (single-tab live view), served over a
-  Cloudflare Tunnel; noVNC rejected (full-desktop, larger surface).
+- **Remote view**: **noVNC** — an interactive live session of the headful browser (Xvfb
+  display) served over a Cloudflare Tunnel with a short-lived token-gated URL. A CDP
+  screencast page was trialed first but proved flaky for interactive login; see the
+  transport-decision note in §5.
 - **Chat**: Telegram Bot API (long-poll or webhook).
 - **Scheduler**: existing scheduler / APScheduler / cron.
 - **Store**: SQLite/JSON workspace for MVP; Postgres later if needed.
@@ -419,7 +433,8 @@ Deferred until the M1–M5 core is proven; listed so the architecture leaves roo
 - **Host choice**: **decided → AWS, persistent always-on VPS** (Lightsail/EC2), for a
   warm browser + low-latency, fluent bot interaction. China-side mirror (Alibaba HK) and
   on-demand lightweight variant deferred; see `host-deployment-comparison.html`.
-- **Remote-view security**: hardening the short-lived token-gated CDP screencast URL.
+- **Remote-view security**: hardening the short-lived token-gated **noVNC** URL — scope
+  the exposed display to a single browser window, auto-expire, tear down after `/done`.
 - **Session longevity**: how often logins expire per target site → handoff frequency.
 - **Source ToS**: confirm each job source permits personal automated polling; prefer
   official APIs to stay clearly inside the lines.

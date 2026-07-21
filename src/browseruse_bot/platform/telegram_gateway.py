@@ -22,6 +22,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 from browseruse_bot import BrowserAgentRunner, TaskPolicy
 from browseruse_bot.core.harvest import load_companies, parse_harvest_request
 from browseruse_bot.core.ids import new_request_id
+from browseruse_bot.core.ledger import harvest_base
 from browseruse_bot.core.logging_setup import setup_logging
 from browseruse_bot.core.observability import trace_url
 from browseruse_bot.core.router import route_request
@@ -135,6 +136,18 @@ class TelegramGateway:
                 await update.message.reply_text(
                     f"{'✅' if result.ok else '⚠️'} {request_id}\n{result.summary[:3500]}"
                 )
+                # Send the collected 面经.md back as a downloadable file.
+                md_path = harvest_base() / company.key / spec.scope_slug / "面经.md"
+                if md_path.exists() and md_path.stat().st_size > 0:
+                    try:
+                        with md_path.open("rb") as f:
+                            await update.message.reply_document(
+                                document=f,
+                                filename=f"{company.key}-{spec.scope_slug}-面经.md",
+                                caption=f"{company.name} 面经 · {scope}",
+                            )
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("could not send harvest file: %s", e)
             except Exception as e:  # noqa: BLE001
                 await update.message.reply_text(f"❌ {request_id} harvest failed: {e}")
             finally:

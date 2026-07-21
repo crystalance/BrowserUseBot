@@ -172,3 +172,13 @@ that act inside users' authenticated browser sessions — with a warm browser po
 DOM-delta context compression, model routing, and compiled deterministic skills to
 keep latency and cost flat as usage scales."
 
+--- 07/20/2026 ---
+1. this agent dont have memory, but every /new starts a new context window(--> what happens if context window is full?) --> temporarily we dont need it --> prospond
+2. how to scale --> docker deployment is a necessary. we can deploy multiple sandbox in one machine of server--> because differnt user cant share the same chorme core
+3. --> be able to send the file back to user through telegram?  -- DONE (harvest sends the 面经.md as a Telegram document after the run; telegram_gateway reply_document)
+4. current architecture is kind of ugly, can we Optimize it?
+5. message queue? distributed system?
+6. analyse past task log to improve UX / latency optimization: tighten end-to-end responsiveness — streaming progress,
+faster login-handoff link delivery, prefetch/cache for common sources, and snappier
+remote-view startup, so it feels instant on the phone.
+7. if we want normal 
