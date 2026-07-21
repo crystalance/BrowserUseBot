@@ -181,4 +181,83 @@ keep latency and cost flat as usage scales."
 6. analyse past task log to improve UX / latency optimization: tighten end-to-end responsiveness — streaming progress,
 faster login-handoff link delivery, prefetch/cache for common sources, and snappier
 remote-view startup, so it feels instant on the phone.
-7. if we want normal 
+7. if we want normal user to experience it quickly, we need -->
+     1. a web application, including the front-end and back-end
+     2. a server to patch the request to other sanboxes (may use message queues)
+     3. it scaled, so mutiple servers/
+     4. figure out how to calculate the cost.
+     5. related database, redis, and so on...
+
+8. 
+
+--- 07/21/2026 ---
+1. product positionning: lightweight personal agent focus on browser-use scenarios,  now my main purpose is to access infomation that needs to be logined or personal-related in batch. (you know, 
+ help users to improve their ability to access infomations and make better decision.) but im sure this isnt the only use case.
+   0. research --> hermes agent
+   1. object --> make other use this easily, quickly, improve the system's Extensibility as the user number grows.
+2. Scale, --> scale to test(test concurrently, ) --> what if i want to test task concurrently? we need to open diffent browser --> containerize it.
+     1. it should be cloud-like, which means the agent should be able to migrate conveniently --> that's where database kicks in.
+3. i dont know the ability boundaries now, --> test to find out
+4. focus on one aspect --> i would like to 
+5. reliability --> what if tasks fails? can we auto-regress it or keep it idempotent?
+
+====================================================================
+MINIMUM MULTI-USER (let friends use it) — design decided 07/21
+====================================================================
+Goal: a few friends use it CONCURRENTLY; grow resources as users grow; migratable;
+reliable. This is DEPLOYMENT extensibility (multi-user), distinct from the Capability
+plug-in extensibility (see 07_21_2026/architecture-supervisor-capabilities.md).
+
+Driving constraint: users CANNOT share a Chrome core -> unit of isolation = one
+browser per user -> control-plane / data-plane split.
+
+  Control plane (1 small process): Gateway (allow-list friends) + Dispatcher
+    (user -> session -> worker container; start on-demand, idle-stop) + task queue.
+  Data plane (N containers, 1 per active user): agent + Chrome + profile volume + noVNC.
+  Portable state = Postgres rows + per-user named profile volumes (containers = cattle).
+
+M-1. Containerize the runtime (Dockerfile: agent + Chrome + Xvfb + noVNC). One
+     container == one user's live session. (reuse run-aws.sh Xvfb+noVNC.) (= todo F2)
+M-2. Per-user Chrome profile = NAMED VOLUME (or object store), keyed by user ->
+     isolation + persistence + MIGRATABLE ("cloud-like": move volume+DB row = move session).
+M-3. Control plane: extend gateway with auth (allow-list) + Dispatcher: user -> their
+     container, start ON DEMAND, idle-stop to bound cost.
+M-4. Postgres (migrate SQLite RunStore): users, sessions(user->volume/container),
+     tasks(status, idempotency_key=request_id, result, artifacts).
+M-5. Concurrency: DROP the global _busy. Per-USER single-flight (1 task/user); DIFFERENT
+     users run in parallel (separate containers). This single change unlocks "test concurrently".
+M-6. Reliability / idempotency (#5):
+     - Task state machine in DB: queued -> running -> needs_login -> done/failed.
+     - Idempotency key = request_id; a retry RESUMES via the ledger (harvest already
+       dedup/resumable) instead of restarting.
+     - Auto-retry TRANSIENT only (429/timeout/container crash) w/ backoff; TERMINAL =
+       login-needed (wait for human) or ToS-block (stop). Requeue tasks stuck in 'running'.
+M-7. Login handoff per user: each user logs into THEIR container's browser via THEIR
+     token-gated noVNC link; never cross containers.
+
+Honest limit: container-per-user is heavy (~0.5-1.5GB/Chrome) -> one VPS fits a handful.
+Idle-stop + a cap NOW; multi-host / browser-pool / k8s autoscaling LATER (DB+volumes
+leave the door open). Don't build it yet (Occam).
+
+Ability boundaries (#3): build a PROBE SUITE (10-20 tasks across a few sites), run them
+CONCURRENTLY in containers, record pass/fail/latency -> that IS the concurrency test AND
+the capability map.
+
+Build order: M-1 (containerize) -> M-5 (per-user concurrency, 1 host) -> M-4 (DB/state)
+-> M-2 (profile volumes) -> M-3 (dispatcher/on-demand) -> M-6 (reliability).
+
+
+---
+questions:
+1. Compute for the agent + can it be serverless (Alibaba FC)?  How do control plane
+   and agents communicate — do we need an MQ?
+   ANSWER (see scaleToEnterpriseLevel/platform-vision.md §6.5):
+   - FC / serverless: resource-YES (custom container fits Chrome) but MODEL-NO — our
+     agent is stateful + long-lived + human-in-the-loop, the opposite of FaaS. Run it as
+     a LONG-LIVED container + persistent volume (Alibaba ECI / ASK / ECS + NAS). FC only
+     for stateless helpers (Phase-2 synthesis, one-shot fetch).
+   - Comms: friends/one-host = NO MQ (co-locate, direct HTTP + shared DB). Multi-host =
+     3 channels: MQ for task dispatch (WITH per-user/affinity routing) + WebSocket/gRPC
+     for live (progress, handoff link, /done) + DB/OSS for durable state. noVNC stream is
+     DIRECT agent→user via tunnel (not through MQ). MQ is forced by "many un-addressable
+     agents + bursty load + durable retries", not merely by "two servers". 
