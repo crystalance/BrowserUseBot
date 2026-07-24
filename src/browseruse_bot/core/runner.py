@@ -140,6 +140,41 @@ def _save_transcript(goal: str, history, result: Result, *, request_id: str | No
         logger.warning("could not save transcript: %s", e)
 
 
+def _bump_browser_timeouts() -> None:
+    """Give a cold Chromium launch more than browser-use's 30s default.
+
+    A cold headful Chromium launch on Windows (AV scan, large profile) can exceed
+    30s → ``BrowserStartEvent timed out`` → the chunk errors AND the spawned
+    chrome.exe is left orphaned, holding the profile's singleton lock so EVERY
+    later launch also times out. Widening the launch/start window prevents that
+    cascade. ``setdefault`` so a user can still override via .env.
+    """
+    for var, val in (
+        ("TIMEOUT_BrowserStartEvent", "90"),
+        ("TIMEOUT_BrowserLaunchEvent", "90"),
+        ("TIMEOUT_BrowserConnectedEvent", "90"),
+    ):
+        os.environ.setdefault(var, val)
+
+
+def _clear_stale_profile_lock(profile_dir: str) -> None:
+    """Remove Chromium singleton locks left by a crashed/killed prior launch.
+
+    This profile dir is dedicated to the bot (a fresh session is created and
+    killed per run), so at the start of a run no legitimate browser holds it —
+    a leftover lock is always stale and would otherwise make the next launch hang.
+    Best-effort: never let cleanup break a run.
+    """
+    p = Path(profile_dir)
+    for name in ("SingletonLock", "SingletonSocket", "SingletonCookie", "lockfile"):
+        try:
+            f = p / name
+            if f.exists() or f.is_symlink():
+                f.unlink()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 class BrowserAgentRunner:
     """Wraps browser-use. ``run_task(goal, policy) -> Result``."""
 
@@ -198,7 +233,9 @@ class BrowserAgentRunner:
                        *, request_id: str | None = None) -> Result:
         policy = policy or TaskPolicy()
         self._stop_requested = False
+        _bump_browser_timeouts()
         Path(self._profile_dir).mkdir(parents=True, exist_ok=True)
+        _clear_stale_profile_lock(self._profile_dir)
 
         if not self._headless:
             _ensure_display()
@@ -295,7 +332,9 @@ class BrowserAgentRunner:
         policy = TaskPolicy()
         policy.allowed_hosts = ["xiaohongshu.com"]
         policy.login_hosts = ["xiaohongshu.com"]
+        _bump_browser_timeouts()
         Path(self._profile_dir).mkdir(parents=True, exist_ok=True)
+        _clear_stale_profile_lock(self._profile_dir)
         if not self._headless:
             _ensure_display()
 

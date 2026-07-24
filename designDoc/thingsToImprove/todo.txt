@@ -261,3 +261,8 @@ questions:
      for live (progress, handoff link, /done) + DB/OSS for durable state. noVNC stream is
      DIRECT agent→user via tunnel (not through MQ). MQ is forced by "many un-addressable
      agents + bursty load + durable retries", not merely by "two servers". 
+
+
+--- Test module ---
+1. test this agents' 
+2. dont failure silently

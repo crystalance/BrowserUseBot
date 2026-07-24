@@ -20,11 +20,13 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 from browseruse_bot import BrowserAgentRunner, TaskPolicy
+from browseruse_bot.core.chat import classify_message
 from browseruse_bot.core.harvest import load_companies, parse_harvest_request
 from browseruse_bot.core.ids import new_request_id
 from browseruse_bot.core.ledger import harvest_base
 from browseruse_bot.core.logging_setup import setup_logging
 from browseruse_bot.core.observability import trace_url
+from browseruse_bot.core.probe import load_probes, run_probe_suite
 from browseruse_bot.core.router import route_request
 from browseruse_bot.core.skills import SkillStore
 from browseruse_bot.platform.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
@@ -83,7 +85,8 @@ class TelegramGateway:
         self._chat_id = str(update.effective_chat.id)
         await update.message.reply_text(
             f"👋 Browser agent ready. Chat ID: {self._chat_id}\n"
-            "/new <goal> · /done · /stop · /status · /stats\n"
+            "Tasks run ONLY via /new <goal>. Plain messages are just chat.\n"
+            "/new <goal> · /done · /stop · /status · /stats · /probe [tier]\n"
             "/skills · /skill add <name> <instructions> · /vision on|off · or send a .md file"
         )
 
@@ -212,6 +215,54 @@ class TelegramGateway:
     async def cmd_status(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("busy" if self._busy else "idle")
 
+    async def cmd_probe(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """Run the batch capability suite (tests/batch/probes.jsonl) SEQUENTIALLY.
+
+        Login walls during any probe reuse the normal handoff: you get a noVNC
+        link and reply /done to resume. Optional arg filters to one tier.
+        """
+        if not self._authorized(update):
+            return
+        if self._busy:
+            await update.message.reply_text("⏳ Busy with a task — try again later.")
+            return
+        tier: int | None = None
+        if ctx.args:
+            try:
+                tier = int(ctx.args[0])
+            except ValueError:
+                tier = None
+        try:
+            probes = load_probes(tier=tier)
+        except Exception as e:  # noqa: BLE001
+            await update.message.reply_text(f"❌ Could not load probes: {e}")
+            return
+        if not probes:
+            await update.message.reply_text(
+                f"No probes match{f' tier {tier}' if tier is not None else ''}."
+            )
+            return
+        self._busy = True
+        self._chat_id = str(update.effective_chat.id)
+        scope = f" (tier {tier})" if tier is not None else ""
+        await update.message.reply_text(f"🧪 Running {len(probes)} probes{scope} sequentially…")
+
+        async def _event(msg: str) -> None:
+            await update.message.reply_text(msg)
+
+        try:
+            report = await run_probe_suite(self.runner, probes=probes, on_event=_event)
+            await update.message.reply_text(f"🏁 {report.summary_line}")
+            if report.summary_path and report.summary_path.exists():
+                with report.summary_path.open("rb") as f:
+                    await update.message.reply_document(
+                        document=f, filename="probe-summary.md", caption=report.summary_line
+                    )
+        except Exception as e:  # noqa: BLE001
+            await update.message.reply_text(f"❌ probe suite failed: {e}")
+        finally:
+            self._busy = False
+
     async def cmd_vision(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._authorized(update):
             return
@@ -263,6 +314,31 @@ class TelegramGateway:
                 "Or send me a .md file, or use /skills to list."
             )
 
+    async def on_text(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """Plain (non-command) message = chat. Never runs a task.
+
+        The LLM decides: small talk → answer it; an implied task → do NOT run it,
+        nudge the user to resend as /new <goal>.
+        """
+        if not self._authorized(update):
+            return
+        text = (update.message.text or "").strip()
+        if not text:
+            return
+        try:
+            decision = await classify_message(text, llm=self.runner._llm)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("chat classify failed: %s", e)
+            await update.message.reply_text("(couldn't parse that — to run a task use /new <goal>)")
+            return
+        if (decision.intent or "").strip().lower() == "task":
+            cmd = decision.suggested_command.strip() or f"/new {text}"
+            await update.message.reply_text(
+                "💡 Sounds like a task. I only run tasks via a command — send:\n" + cmd
+            )
+        else:
+            await update.message.reply_text(decision.reply.strip() or "🙂")
+
     async def on_document(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._authorized(update):
             return
@@ -281,11 +357,13 @@ class TelegramGateway:
         self._app.add_handler(CommandHandler("done", self.cmd_done))
         self._app.add_handler(CommandHandler("stop", self.cmd_stop))
         self._app.add_handler(CommandHandler("status", self.cmd_status))
+        self._app.add_handler(CommandHandler("probe", self.cmd_probe))
         self._app.add_handler(CommandHandler("vision", self.cmd_vision))
         self._app.add_handler(CommandHandler("stats", self.cmd_stats))
         self._app.add_handler(CommandHandler("skills", self.cmd_skills))
         self._app.add_handler(CommandHandler("skill", self.cmd_skill))
         self._app.add_handler(MessageHandler(filters.Document.ALL, self.on_document))
+        self._app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.on_text))
         logger.info("Telegram gateway polling…")
         self._app.run_polling()
 

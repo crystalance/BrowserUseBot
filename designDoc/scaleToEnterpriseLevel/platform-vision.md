@@ -1,4 +1,4 @@
-# Platform Vision — "Agent-as-a-Service" (dependent project, deferred)
+# Emissary — Platform Vision (a console to build & manage your custom agents; deferred)
 
 > 2026-07-21 · designDoc/scaleToEnterpriseLevel
 > **Status: PARKED / dependent project.** Do NOT build now. The main project stays a
@@ -7,15 +7,33 @@
 
 ---
 
+## 0. Name
+
+**Emissary** — a platform to **build, manage, and observe your own custom browser
+agents**. You define each agent (its skills, allowed sites, credentials/session,
+channel); Emissary provisions it, runs it inside *your* authenticated browser sessions
+with a human in the loop, and gives you one console to watch and control the whole fleet.
+The platform is **Emissary**; each agent you configure is **"an emissary"** (your custom
+agent); the fleet/control plane is the **Emissary orchestrator**. (Rationale: the product
+is *custom-agent management* — provisioning, config, observability, lifecycle — on top of
+a moat of delegated, credentialed action; a delegation/steward name beats access-only
+names like *Keyhole* or *Concierge*.)
+
+---
+
 ## 1. The idea in one line
 
-> A console (front-end + back-end) that **provisions, observes, and manages a
-> dedicated agent instance per user** — "like AWS for personal browser agents." After
-> setup, each user mainly talks to **their own agent** over Telegram (Lark later).
+> A console (front-end + back-end) to **build, run, and manage your custom browser
+> agents** — each provisioned as its own dedicated instance, acting inside *your*
+> authenticated sessions. "Like AWS for personal browser agents." After setup, you talk
+> to each of **your agents** over Telegram (Lark later), and manage them all from the
+> console.
 
-The lightweight agent (this repo) is the **unit**. The platform is the **fleet manager**
-around many copies of it. Keep them decoupled: the agent exposes a clean interface
-(start task → stream progress → login handoff → artifacts); the platform drives it.
+The lightweight agent (this repo) is the **unit** — a single customizable agent. The
+platform is the **fleet manager** around many of them: you compose custom agents (skills +
+allowed sites + session + channel), and Emissary provisions, observes, and controls them.
+Keep them decoupled: the agent exposes a clean interface (start task → stream progress →
+login handoff → artifacts); the platform drives and manages the fleet.
 
 ---
 
